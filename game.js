@@ -66,6 +66,10 @@ const DAY = todayIndex();
 const N = ORDER.length;
 const ANSWER = fullWord(ORDER[((DAY % N) + N) % N]);
 const ALLOWED = new Set(CAT_IDENTIFIERS.map(fullWord));
+// real catalogue entries kept out of the game (no SIMBAD data — mostly IC
+// numbers that turned out to be stars or lost); rejected with an honest
+// message rather than "not a known object identifier"
+const EXCLUDED = new Set(CAT_EXCLUDED.map(fullWord));
 
 function displayName(padded) {
   return padded.trim();
@@ -655,7 +659,9 @@ function submitGuess() {
   // tiles left empty count as blanks, e.g. "NGC0042" -> "NGC0042 "
   const guess = current.join("").padEnd(WORD_LEN, BLANK);
   if (!ALLOWED.has(guess)) {
-    showMessage(`${displayName(guess)} is not a known object identifier`);
+    showMessage(EXCLUDED.has(guess)
+      ? `${displayName(guess)} is a real catalogue entry, but SIMBAD has no data on it — not in the game`
+      : `${displayName(guess)} is not a known object identifier`);
     shakeCurrentRow();
     return;
   }
