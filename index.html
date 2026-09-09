@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<!-- SPDX-License-Identifier: AGPL-3.0-only -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Muldle — Find the astronomical object name or identifier</title>
+<link rel="stylesheet" href="style.css">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+</head>
+<body>
+<header>
+  <button id="settings-button" class="settings-button" aria-label="Settings" title="Settings">⚙</button>
+  <h1>MULDLE <span class="mul-glyph" title="MUL 𒀯 — Sumerian for 'star'">𒀯</span></h1>
+  <p class="tagline">Find the astronomical object name or identifier.</p>
+  <p class="puzzle-info" id="puzzle-info"></p>
+</header>
+
+<main>
+  <div class="board-area">
+    <aside id="hint-panel" class="hint-panel" aria-label="object hints"></aside>
+    <div id="board" class="board" aria-label="game board"></div>
+    <aside id="object-panel" class="object-panel" hidden>
+      <div id="aladin-lite-div"></div>
+      <p id="object-caption" class="object-caption"></p>
+    </aside>
+  </div>
+
+  <div id="message" class="message" role="status"></div>
+
+  <div id="keyboard" class="keyboard"></div>
+
+  <details class="help">
+    <summary>How to play</summary>
+    <p>Guess today's identifier in 6 tries. Every guess must be a real entry
+    in the identifier list (currently the NGC and IC catalogues).</p>
+    <p>You type the full identifier: the catalogue prefix
+    (<strong>NGC</strong> or <strong>IC</strong>), then 4 digits (zero-padded,
+    e.g. NGC 42 is <code>NGC0042</code>, IC 434 is <code>IC0434</code>), plus
+    a component letter if the object has one (A&ndash;F, e.g.
+    <code>NGC1023A</code>). Any character can go in any tile; tiles you leave
+    empty when pressing Enter count as blanks, so just type the identifier
+    and hit Enter.</p>
+    <p>After each guess the tiles show how close you are:
+    <span class="mini correct">green</span> = right character, right place;
+    <span class="mini present">yellow</span> = in the identifier, wrong place;
+    <span class="mini absent">grey</span> = not in the identifier.</p>
+    <p>The panel left of the board describes each guessed object:
+    constellation, object type (click it for an explanation), magnitude, and
+    the angular distance to the target with an arrow pointing towards it
+    (north up, east left, as on the sky).
+    <span class="mini correct">green</span> = matches the target
+    (distance/magnitude: very close), <span class="mini present">yellow</span>
+    = nearly. Type and magnitude come from SIMBAD and need a network
+    connection.</p>
+    <p>Click a submitted guess row to see that object in a sky view right of
+    the board; when the game is over the view shows the target, and clicking
+    guesses lets you compare.</p>
+    <p><strong>Hard mode</strong> is on by default (toggle in settings ⚙):
+    revealed hints must be used in subsequent guesses &mdash; green tiles
+    must stay in place, yellow characters must be reused, and greyed-out
+    characters may not be used again.</p>
+    <p>A new puzzle appears every day at midnight (local time).</p>
+    <p class="about-name">MUL <span class="mul-glyph">𒀯</span> — Sumerian for
+    &ldquo;star&rdquo;, after the oldest known star catalogues: the Babylonian
+    &ldquo;Three Stars Each&rdquo; lists (cuneiform: MUL.MEŠ 3.TA.ÀM, c. 12th
+    century BC) and their successor MUL.APIN.</p>
+  </details>
+</main>
+
+<dialog id="settings-dialog" class="settings-dialog">
+  <button id="settings-close" class="settings-close" aria-label="Close">×</button>
+  <h2>Settings</h2>
+  <label class="settings-toggle">
+    <input type="checkbox" id="hard-mode-toggle" checked>
+    <span class="settings-toggle-text">Hard mode
+      <span>revealed hints must be used in subsequent guesses</span></span>
+  </label>
+  <button id="reset-puzzle" class="settings-action">Reset puzzle
+    <span>replay the current puzzle from scratch</span></button>
+  <button id="reset-random" class="settings-action">Reset to random object
+    <span>practice on a random NGC object instead of today's</span></button>
+  <button id="back-to-daily" class="settings-action" hidden>Back to today's puzzle
+    <span>leave random mode (current guesses are discarded)</span></button>
+</dialog>
+
+<footer>
+  <p>Identifiers from <a href="https://cdsarc.cds.unistra.fr/viz-bin/cat/VII/239A" target="_blank" rel="noopener">VizieR VII/239A</a> (Corwin, 2004);
+  object data from <a href="https://simbad.cds.unistra.fr/" target="_blank" rel="noopener">SIMBAD</a>;
+  sky view by <a href="https://aladin.cds.unistra.fr/AladinLite/" target="_blank" rel="noopener">Aladin Lite</a> — all CDS, Strasbourg.</p>
+  <p>Inspired by <a href="https://www.nytimes.com/games/wordle/" target="_blank" rel="noopener">Wordle</a> (no affiliation).
+  <a href="https://github.com/bertblookers/muldle" target="_blank" rel="noopener">Source</a> (AGPL-3.0) ·
+  <a href="https://github.com/bertblookers/muldle/blob/main/ATTRIBUTION.md" target="_blank" rel="noopener">Data credits</a></p>
+</footer>
+
+<script src="data.js"></script>
+<script src="game.js"></script>
+</body>
+</html>

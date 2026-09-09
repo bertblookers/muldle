@@ -1,0 +1,443 @@
+/* SPDX-License-Identifier: AGPL-3.0-only */
+
+/* MulGlyph: Noto Sans Cuneiform (SIL OFL 1.1) subset to the single MUL sign
+   𒀯 U+1202F — almost no system ships a cuneiform font, so we carry our own */
+@font-face {
+  font-family: "MulGlyph";
+  src: url("mul.woff2") format("woff2");
+  unicode-range: U+1202F;
+}
+
+:root {
+  --bg: #0b0e1a;
+  --bg2: #121631;
+  --tile-border: #3a3f5c;
+  --tile-filled-border: #6b7194;
+  --text: #e8eaf2;
+  --dim: #9aa0b8;
+  --correct: #4c9a4c;
+  --present: #b8a038;
+  --absent: #3a3f52;
+  --key-bg: #454a63;
+  --accent: #7ea6e0;
+  /* fluid sizes: full-size on desktop, shrinking so the 8 tiles / 10 keys
+     of the widest rows fit small phone screens (2rem = horizontal padding) */
+  --tile-gap: 6px;
+  --key-gap: 6px;
+  --tile-size: min(3rem, calc((100vw - 2rem - 7 * var(--tile-gap)) / 8));
+  --key-size: min(2.4rem, calc((100vw - 2rem - 9 * var(--key-gap)) / 10));
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+/* keep the hidden attribute working on elements we give a display value */
+[hidden] { display: none !important; }
+
+body {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  font-family: "Segoe UI", system-ui, sans-serif;
+  color: var(--text);
+  background: var(--bg);
+}
+
+/* subtle star field + page gradient (a fixed layer, because
+   background-attachment: fixed on body is broken on iOS Safari) */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background-image:
+    radial-gradient(1px 1px at 12% 22%, #fff8 50%, transparent 50%),
+    radial-gradient(1px 1px at 78% 12%, #fff6 50%, transparent 50%),
+    radial-gradient(1.5px 1.5px at 55% 35%, #fff9 50%, transparent 50%),
+    radial-gradient(1px 1px at 32% 68%, #fff5 50%, transparent 50%),
+    radial-gradient(1px 1px at 88% 55%, #fff7 50%, transparent 50%),
+    radial-gradient(1.5px 1.5px at 8% 85%, #fff6 50%, transparent 50%),
+    radial-gradient(1px 1px at 65% 82%, #fff8 50%, transparent 50%),
+    radial-gradient(1px 1px at 42% 8%, #fff5 50%, transparent 50%),
+    radial-gradient(1px 1px at 95% 90%, #fff6 50%, transparent 50%),
+    radial-gradient(1px 1px at 25% 45%, #fff4 50%, transparent 50%),
+    radial-gradient(ellipse at 20% 10%, var(--bg2) 0%, var(--bg) 60%);
+}
+
+header {
+  text-align: center;
+  padding: 1.2rem 1rem 0.6rem;
+}
+
+h1 {
+  font-size: 2rem;
+  letter-spacing: 0.35em;
+  margin-right: -0.35em;
+  color: var(--text);
+  text-shadow: 0 0 18px #7ea6e055;
+}
+
+.mul-glyph {
+  font-family: "MulGlyph", sans-serif;
+  letter-spacing: normal;
+  color: var(--present);
+  cursor: help;
+}
+.about-name { color: var(--dim); font-style: italic; }
+.about-name .mul-glyph { cursor: inherit; }
+
+.tagline { color: var(--dim); font-size: 0.9rem; margin-top: 0.2rem; }
+.puzzle-info { color: var(--dim); font-size: 0.8rem; margin-top: 0.3rem; }
+
+main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 0.5rem 1rem;
+  width: 100%;
+  max-width: 560px;
+}
+
+.board-area {
+  display: flex;
+  gap: 1.2rem;
+  align-items: flex-start;
+  margin: 0.8rem 0;
+}
+
+.board {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* post-game object viewer (Aladin Lite), sized from JS to match the board */
+.object-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+#aladin-lite-div {
+  border: 2px solid var(--tile-border);
+  border-radius: 4px;
+  overflow: hidden;
+  background: #000;
+}
+
+.object-caption {
+  color: var(--dim);
+  font-size: 0.8rem;
+  text-align: center;
+}
+.object-caption a { color: var(--accent); }
+
+/* "guess" / "target" badge in front of the caption */
+.object-role {
+  text-transform: uppercase;
+  font-size: 0.62rem;
+  letter-spacing: 0.08em;
+  border: 1px solid var(--dim);
+  border-radius: 3px;
+  padding: 0 0.35em;
+}
+.object-role.target { color: var(--accent); border-color: var(--accent); }
+
+/* per-guess object-properties hints, rows aligned with the board rows */
+.hint-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.hint-row { display: flex; gap: 4px; }
+
+.hint-cell {
+  height: 3rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  border: 1px solid var(--tile-border);
+  border-radius: 4px;
+  background: transparent;
+  transition: background 0.25s, border-color 0.25s;
+}
+.hint-cell.con  { width: 5.9rem; }
+.hint-cell.type { width: 4.8rem; }
+.hint-cell.mag  { width: 3.6rem; }
+.hint-cell.dist { width: 4.2rem; }
+
+/* full constellation names may need two lines ("Triangulum Australe") */
+.hint-cell.con .hint-value {
+  white-space: normal;
+  font-size: 0.72rem;
+  line-height: 1.1;
+  text-align: center;
+}
+
+.hint-value a { color: inherit; text-decoration: underline dotted; }
+.hint-value a:hover { text-decoration: underline; }
+
+.hint-label {
+  font-size: 0.55rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+
+.hint-value {
+  font-size: 0.85rem;
+  font-weight: 600;
+  min-height: 1em;
+  white-space: nowrap;
+  max-width: calc(100% - 6px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hint-cell.match { background: var(--correct); border-color: var(--correct); }
+.hint-cell.near  { background: var(--present); border-color: var(--present); }
+.hint-cell.match .hint-label, .hint-cell.near .hint-label { color: var(--text); }
+
+/* touch screens: no hover — a tapped key/row would stay highlighted */
+@media (hover: hover) {
+  .key:hover { filter: brightness(1.15); }
+  .row.guessed:hover .tile { filter: brightness(1.2); }
+}
+
+@media (max-width: 900px) {
+  /* stack everything in main's column, keyboard right under the board so
+     the game is playable without scrolling; hints and sky view below */
+  .board-area { display: contents; }
+  .board { order: 0; margin: 0.8rem 0 0; }
+  .message { order: 1; }
+  .keyboard { order: 2; }
+  .hint-panel { order: 3; margin-bottom: 0.8rem; }
+  .object-panel { order: 4; margin-bottom: 0.8rem; }
+  .help { order: 5; }
+}
+
+.row { display: flex; gap: var(--tile-gap); touch-action: manipulation; }
+
+.tile {
+  width: var(--tile-size);
+  height: var(--tile-size);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: calc(var(--tile-size) / 2);
+  font-weight: 700;
+  border: 2px solid var(--tile-border);
+  border-radius: 4px;
+  background: transparent;
+  transition: background 0.25s, border-color 0.25s, transform 0.1s;
+}
+
+.tile.filled { border-color: var(--tile-filled-border); animation: pop 0.1s; }
+
+.tile.correct { background: var(--correct); border-color: var(--correct); }
+.tile.present { background: var(--present); border-color: var(--present); }
+.tile.absent  { background: var(--absent);  border-color: var(--absent); }
+
+@keyframes pop { 50% { transform: scale(1.08); } }
+
+/* submitted rows can be clicked to show that object in the sky view */
+.row.guessed { cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.row.viewing {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 2px;
+}
+
+.row.shake { animation: shake 0.4s; }
+@keyframes shake {
+  20% { transform: translateX(-5px); }
+  40% { transform: translateX(5px); }
+  60% { transform: translateX(-3px); }
+  80% { transform: translateX(3px); }
+}
+
+.message {
+  min-height: 1.6rem;
+  font-size: 1rem;
+  color: var(--accent);
+  text-align: center;
+  margin-bottom: 0.4rem;
+}
+.message.reveal { font-size: 1.1rem; font-weight: 600; }
+
+.keyboard {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  align-items: center;
+  margin-bottom: 1rem;
+  user-select: none;
+}
+
+.krow { display: flex; gap: var(--key-gap); }
+
+.key {
+  min-width: var(--key-size);
+  height: 3.2rem;
+  padding: 0 0.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--text);
+  background: var(--key-bg);
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: background 0.15s;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+.key:active { transform: scale(0.95); }
+.key.wide { min-width: 3.9rem; font-size: 0.85rem; }
+.key.correct { background: var(--correct); }
+.key.present { background: var(--present); }
+.key.absent  { background: #23263a; color: var(--dim); }
+
+.help {
+  max-width: 30rem;
+  color: var(--dim);
+  font-size: 0.88rem;
+  line-height: 1.5;
+  margin-bottom: 1rem;
+}
+.help summary { cursor: pointer; color: var(--text); margin-bottom: 0.4rem; }
+.help p { margin: 0.4rem 0; }
+.help code { background: #1c2038; padding: 0 0.3em; border-radius: 3px; }
+
+.mini {
+  display: inline-block;
+  padding: 0 0.4em;
+  border-radius: 3px;
+  color: var(--text);
+  font-weight: 600;
+}
+.mini.correct { background: var(--correct); }
+.mini.present { background: var(--present); }
+.mini.absent  { background: var(--absent); }
+
+footer {
+  padding: 0.8rem;
+  color: var(--dim);
+  font-size: 0.75rem;
+  text-align: center;
+}
+footer a { color: var(--accent); }
+
+/* settings */
+.settings-button {
+  position: absolute;
+  top: 0.9rem;
+  right: 1rem;
+  background: none;
+  border: none;
+  color: var(--dim);
+  font-size: 1.5rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.settings-button:hover { color: var(--text); }
+
+.settings-dialog {
+  margin: auto; /* recenter: the global margin reset removes the UA default */
+  background: var(--bg2);
+  color: var(--text);
+  border: 2px solid var(--tile-border);
+  border-radius: 8px;
+  padding: 1.2rem 1.4rem;
+  width: min(21rem, 90vw);
+}
+.settings-dialog::backdrop { background: #000b; }
+.settings-dialog h2 {
+  font-size: 1.05rem;
+  letter-spacing: 0.15em;
+  text-align: center;
+  margin-bottom: 0.9rem;
+}
+
+.settings-toggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  margin: 0.45rem 0 0.7rem;
+  padding: 0.55rem 0.8rem;
+  background: var(--key-bg);
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+.settings-toggle input { margin-top: 0.25rem; accent-color: var(--correct); }
+.settings-toggle-text span {
+  display: block;
+  margin-top: 2px;
+  color: var(--dim);
+  font-size: 0.78rem;
+  font-weight: 400;
+}
+
+.settings-action {
+  display: block;
+  width: 100%;
+  margin: 0.45rem 0;
+  padding: 0.55rem 0.8rem;
+  background: var(--key-bg);
+  color: var(--text);
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  text-align: left;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+.settings-action span {
+  display: block;
+  margin-top: 2px;
+  color: var(--dim);
+  font-size: 0.78rem;
+  font-weight: 400;
+}
+.settings-action:hover { filter: brightness(1.15); }
+
+.settings-close {
+  position: absolute;
+  top: 0.4rem;
+  right: 0.6rem;
+  background: none;
+  border: none;
+  color: var(--dim);
+  font-size: 1.3rem;
+  cursor: pointer;
+}
+.settings-close:hover { color: var(--text); }
+
+@media (max-width: 430px) {
+  /* tighter gaps + padding buy the fluid tiles/keys some extra width */
+  :root { --tile-gap: 4px; --key-gap: 4px; }
+  main { padding: 0.5rem; }
+  .board { gap: 4px; }
+  .key { padding: 0 0.2rem; }
+  .hint-cell { height: 2.6rem; }
+  .hint-value { font-size: 0.78rem; }
+}
+
+/* very small / old phones (e.g. 320x568): shave header + key height so the
+   board and full keyboard still fit above the fold */
+@media (max-width: 340px) {
+  header { padding-top: 0.8rem; }
+  h1 { font-size: 1.6rem; }
+  .key { height: 2.9rem; }
+  .keyboard { gap: 5px; }
+}
