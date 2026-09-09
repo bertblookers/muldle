@@ -240,6 +240,9 @@ main {
 
 .tile.filled { border-color: var(--tile-filled-border); animation: pop 0.1s; }
 
+/* hard mode: known-green tiles prefilled in the row being typed */
+.tile.locked { border-color: var(--correct); color: var(--correct); }
+
 .tile.correct { background: var(--correct); border-color: var(--correct); }
 .tile.present { background: var(--present); border-color: var(--present); }
 .tile.absent  { background: var(--absent);  border-color: var(--absent); }

@@ -80,10 +80,27 @@ function displayName(padded) {
 const STORAGE_KEY = "muldle-v1";
 
 let guesses = [];          // array of padded guess strings already submitted
-let current = [];          // characters of the guess being typed
+let current = [];          // characters of the guess being typed, indexed by
+                           // tile position (sparse: holes are empty tiles)
+let lockedTiles = [];      // hard mode: positions prefilled with known greens
 let finished = false;      // won or lost
 let randomId = null;       // identifier overriding the daily answer (random-object mode)
 let answer = ANSWER;       // answer of the puzzle being played (padded)
+
+// start a fresh guess row; in hard mode every known-green tile (one a previous
+// guess already matched, blanks included) starts filled in and locked —
+// typing fills only the free tiles and Backspace skips the locked ones
+function resetCurrentRow() {
+  current = [];
+  lockedTiles = [];
+  if (hardMode && !finished) {
+    for (const g of guesses) {
+      for (let i = 0; i < WORD_LEN; i++) {
+        if (g[i] === answer[i]) { current[i] = answer[i]; lockedTiles[i] = true; }
+      }
+    }
+  }
+}
 
 function saveState() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify({ day: DAY, guesses, randomId }));
@@ -322,12 +339,12 @@ function renderCurrentRow() {
   for (let c = 0; c < WORD_LEN; c++) {
     const t = tiles[r][c];
     const ch = current[c];
-    t.classList.remove("filled");
+    t.classList.remove("filled", "locked");
     if (ch === undefined) {
       t.textContent = "";
     } else {
-      t.textContent = ch;
-      t.classList.add("filled");
+      t.textContent = ch === BLANK ? "" : ch;
+      t.classList.add(lockedTiles[c] ? "locked" : "filled");
     }
   }
 }
@@ -340,7 +357,7 @@ function renderGuessRow(r, guess) {
   for (let c = 0; c < WORD_LEN; c++) {
     const t = tiles[r][c];
     t.textContent = guess[c] === BLANK ? "" : guess[c];
-    t.classList.remove("filled");
+    t.classList.remove("filled", "locked"); // locked text color would hide the char
     t.classList.add(score[c]);
     if (guess[c] !== BLANK) upgradeKey(guess[c], score[c]);
   }
@@ -642,22 +659,35 @@ function handleKey(k) {
   if (finished) return;
   if (k === "Enter") { submitGuess(); return; }
   if (k === "Back") {
-    if (current.length > 0) { current.pop(); renderCurrentRow(); }
+    // clear the last typed tile, skipping locked greens
+    for (let i = WORD_LEN - 1; i >= 0; i--) {
+      if (current[i] !== undefined && !lockedTiles[i]) {
+        delete current[i];
+        renderCurrentRow();
+        break;
+      }
+    }
     return;
   }
-  // any character goes anywhere; validity is checked on Enter
-  if (current.length >= WORD_LEN) return;
-  if (/^[0-9A-Z]$/.test(k)) { current.push(k); renderCurrentRow(); }
+  // any character goes anywhere; validity is checked on Enter. The first
+  // empty tile is the cursor — locked greens are filled, so typing skips them
+  if (!/^[0-9A-Z]$/.test(k)) return;
+  for (let i = 0; i < WORD_LEN; i++) {
+    if (current[i] === undefined) { current[i] = k; renderCurrentRow(); break; }
+  }
 }
 
 function submitGuess() {
-  if (current.length === 0) {
+  // sparse iteration: only typed tiles are visited, so this asks for input
+  // until the player has typed at least one character beyond the prefill
+  if (!current.some((ch, i) => !lockedTiles[i])) {
     showMessage("Type an identifier first");
     shakeCurrentRow();
     return;
   }
   // tiles left empty count as blanks, e.g. "NGC0042" -> "NGC0042 "
-  const guess = current.join("").padEnd(WORD_LEN, BLANK);
+  let guess = "";
+  for (let i = 0; i < WORD_LEN; i++) guess += current[i] ?? BLANK;
   if (!ALLOWED.has(guess)) {
     showMessage(EXCLUDED.has(guess)
       ? `${displayName(guess)} is a real catalogue entry, but SIMBAD has no data on it — not in the game`
@@ -676,7 +706,6 @@ function submitGuess() {
   renderGuessRow(guesses.length, guess);
   renderHintRow(guesses.length, guess);
   guesses.push(guess);
-  current = [];
   saveState();
 
   if (guess === answer) {
@@ -688,6 +717,8 @@ function submitGuess() {
     showMessage(`Out of guesses — it was ${displayName(answer)}.`, true);
     showObject(answer.trim());
   }
+  resetCurrentRow();       // prefill the next row's greens (no-op if finished)
+  renderCurrentRow();
 }
 
 document.addEventListener("keydown", (e) => {
@@ -721,6 +752,10 @@ function loadSettings() {
 hardModeToggle.addEventListener("change", () => {
   hardMode = hardModeToggle.checked;
   localStorage.setItem(SETTINGS_KEY, JSON.stringify({ hardMode }));
+  // re-derive the prefill for the row being typed (on: lock known greens,
+  // off: free all tiles); partial input is discarded to avoid collisions
+  resetCurrentRow();
+  renderCurrentRow();
 });
 
 function updateInfo() {
@@ -733,7 +768,7 @@ function clearBoardUI() {
   for (const row of tiles) {
     for (const t of row) {
       t.textContent = "";
-      t.classList.remove("filled", "correct", "present", "absent");
+      t.classList.remove("filled", "locked", "correct", "present", "absent");
     }
   }
   for (const rowEl of boardEl.children) {
@@ -759,8 +794,8 @@ function startPuzzle(newRandomId, msg) {
   randomId = newRandomId;
   answer = randomId ? fullWord(randomId) : ANSWER;
   guesses = [];
-  current = [];
   finished = false;
+  resetCurrentRow(); // no guesses yet, so no prefill — just clears the row
   clearBoardUI();
   hideObjectPanel();
   updateInfo();
@@ -808,3 +843,5 @@ if (guesses.length && guesses[guesses.length - 1] === answer) {
   showMessage(`Out of guesses — it was ${displayName(answer)}.`, true);
   showObject(answer.trim());
 }
+resetCurrentRow();  // prefill greens from restored guesses (hard mode)
+renderCurrentRow();
