@@ -406,7 +406,9 @@ function loadAladin() {
 
 // Object type, angular size (-> field of view, SIMBAD-style: 2x major axis)
 // and magnitude (V, else B). Cached per identifier; a failed fetch is not
-// cached so a later guess retries.
+// cached so a later guess retries. `found` distinguishes an object SIMBAD
+// doesn't know (false — ~12% of Corwin's identifiers, mostly IC entries
+// that turned out to be stars/lost) from a failed fetch (null).
 const objectInfoCache = new Map();
 
 function fetchObjectInfo(ident) {
@@ -422,10 +424,12 @@ function fetchObjectInfo(ident) {
   const p = fetch(url)
     .then(r => r.json())
     .then(j => {
+      const found = !!(j.data && j.data.length);
       const row = (j.data && j.data[0]) || [];
       const majArcmin = row[1];
       const mag = row[2] ?? row[3];
       return {
+        found,
         otype: row[0] || "",
         fov: majArcmin ? Math.max((majArcmin * 2) / 60, MIN_FOV) : DEFAULT_FOV,
         mag: mag ?? null,
@@ -435,7 +439,7 @@ function fetchObjectInfo(ident) {
     })
     .catch(() => {
       objectInfoCache.delete(ident);
-      return { fov: DEFAULT_FOV, otype: "", mag: null, band: "", typeDesc: "" };
+      return { found: null, fov: DEFAULT_FOV, otype: "", mag: null, band: "", typeDesc: "" };
     });
   objectInfoCache.set(ident, p);
   return p;
@@ -474,8 +478,9 @@ function renderHintRow(r, guess) {
   Promise.all([fetchObjectInfo(simbadIdent(gId)), fetchObjectInfo(simbadIdent(aId))])
     .then(([g, a]) => {
       if (gen !== puzzleGen) return; // puzzle was reset meanwhile
-      setHint(cells.type, g.otype || "?",
+      setHint(cells.type, g.otype || (g.found === false ? "n/a" : "?"),
         g.otype && g.otype === a.otype ? "match" : "");
+      if (g.found === false) cells.type.val.title = "Not in SIMBAD";
       if (g.otype) {
         // link the type code to its explanation on the SIMBAD object-types page
         const link = document.createElement("a");
@@ -489,7 +494,8 @@ function renderHintRow(r, guess) {
         cells.type.val.title = g.typeDesc || g.otype;
       }
       if (g.mag == null) {
-        setHint(cells.mag, "?", "");
+        setHint(cells.mag, g.found === false ? "n/a" : "?", "");
+        if (g.found === false) cells.mag.val.title = "Not in SIMBAD";
       } else {
         setHint(cells.mag, g.mag.toFixed(1) + " " + g.band,
           a.mag == null ? "" : closeness(Math.abs(g.mag - a.mag), MAG_MATCH, MAG_NEAR));
@@ -515,19 +521,32 @@ function markShownRow() {
   }
 }
 
-function renderCaption(id, ident, otype) {
+function renderCaption(id, ident, otype, found) {
   const isTarget = fullWord(id) === answer;
   const role = document.createElement("span");
   role.className = "object-role" + (isTarget ? " target" : "");
   role.textContent = isTarget ? "target" : "guess";
   const link = document.createElement("a");
-  link.href = "https://simbad.cds.unistra.fr/simbad/sim-basic?Ident=" +
-    encodeURIComponent(ident);
+  if (found === false) {
+    // SIMBAD has no entry for this identifier (mostly IC entries that turned
+    // out to be stars/lost) — link a coordinate search at Corwin's position
+    // instead of a dead sim-basic page
+    const idx = catalogueIndex(fullWord(id));
+    const [ra, dec] = CAT_POSITIONS[idx];
+    link.href = "https://simbad.cds.unistra.fr/simbad/sim-coo?Coord=" +
+      encodeURIComponent(`${ra} ${dec >= 0 ? "+" : ""}${dec}`) +
+      "&Radius=2&Radius.unit=arcmin";
+    link.title = "Not in SIMBAD — search this position instead";
+  } else {
+    link.href = "https://simbad.cds.unistra.fr/simbad/sim-basic?Ident=" +
+      encodeURIComponent(ident);
+  }
   link.target = "_blank";
   link.rel = "noopener";
   link.textContent = ident;
   captionEl.replaceChildren(role, " ", link);
   if (otype) captionEl.append(" · " + otype);
+  else if (found === false) captionEl.append(" · not in SIMBAD");
   if (finished && !isTarget) {
     const back = document.createElement("a");
     back.href = "#";
@@ -584,7 +603,7 @@ function showObject(id) {
           showProjectionControl: false,
         });
       }
-      renderCaption(id, ident, info.otype);
+      renderCaption(id, ident, info.otype, info.found);
     })
     .catch(() => {
       if (gen !== puzzleGen || shownId !== id) return;
