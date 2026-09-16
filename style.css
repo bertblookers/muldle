@@ -121,11 +121,58 @@ main {
   gap: 0.4rem;
 }
 
-#aladin-lite-div {
+#aladin-lite-div, #abc-aladin-div {
   border: 2px solid var(--tile-border);
   border-radius: 4px;
   overflow: hidden;
   background: #000;
+}
+
+/* image + survey picker sit side by side; align-items:stretch makes the picker
+   column match the (JS-sized) image height, caption stays below */
+.viewer-row {
+  display: flex;
+  gap: 0.4rem;
+  align-items: stretch;
+}
+
+/* stacked square buttons: flex:1 splits the column height across the buttons,
+   aspect-ratio:1 makes each square, so button side = imageHeight / N */
+.survey-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.survey-btn {
+  flex: 1 1 0;
+  aspect-ratio: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--text);
+  background: transparent;
+  border: 2px solid var(--tile-border);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s, color 0.2s, opacity 0.2s;
+}
+.survey-btn.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #000;
+}
+.survey-btn.disabled, .survey-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+@media (hover: hover) {
+  .survey-btn:not(:disabled):not(.active):hover { border-color: var(--accent); }
 }
 
 .object-caption {
@@ -434,13 +481,155 @@ footer a { color: var(--accent); }
   .key { padding: 0 0.2rem; }
   .hint-cell { height: 2.6rem; }
   .hint-value { font-size: 0.78rem; }
+  .title-row { gap: 0.5rem; }
+  .mode-seg { padding: 0.15rem 0.55rem; }
 }
 
 /* very small / old phones (e.g. 320x568): shave header + key height so the
    board and full keyboard still fit above the fold */
 @media (max-width: 340px) {
   header { padding-top: 0.8rem; }
-  h1 { font-size: 1.6rem; }
+  h1 { font-size: 1.5rem; letter-spacing: 0.2em; margin-right: -0.2em; }
   .key { height: 2.9rem; }
   .keyboard { gap: 5px; }
+  /* keep title + toggle on one line and drop the tagline so the board and
+     full keyboard still clear the fold once the toggle is in the header */
+  .title-row { gap: 0.45rem; flex-wrap: nowrap; }
+  .mode-seg { padding: 0.12rem 0.45rem; font-size: 0.68rem; letter-spacing: 0.08em; }
+  .tagline { display: none; }
+}
+
+/* ============ ID <-> ABC mode flip ============ */
+
+/* The whole game is a card flipping around a central vertical axis: face-id on
+   the front, face-abc on the back. Both faces stay in the DOM (stacked in one
+   grid cell so the scene is as tall as the taller face). */
+#flip-scene {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  perspective: 2200px;
+  perspective-origin: 50% 40%;
+}
+#flipper {
+  display: grid;
+  width: 100%;
+  transform-style: preserve-3d;
+  transition: transform 0.85s cubic-bezier(0.45, 0.05, 0.2, 1);
+  transform: rotateY(0deg);
+}
+/* ID -> ABC: the left edge swings towards the viewer (positive rotateY);
+   ABC -> ID replays the same transition in reverse */
+#flipper.flipped { transform: rotateY(180deg); }
+#flipper.no-anim { transition: none; }
+
+.face {
+  grid-area: 1 / 1;          /* stack both faces in the same cell */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+  backface-visibility: hidden;
+}
+#face-abc { transform: rotateY(180deg); }
+
+@media (prefers-reduced-motion: reduce) {
+  #flipper { transition: none; }
+}
+
+/* title + mode toggle side by side */
+.title-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.9rem;
+  flex-wrap: wrap;
+}
+
+.mode-toggle {
+  display: inline-flex;
+  border: 1px solid var(--tile-filled-border);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.mode-seg {
+  background: transparent;
+  color: var(--dim);
+  border: none;
+  padding: 0.2rem 0.75rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  cursor: pointer;
+  transition: background 0.2s, color 0.2s;
+  -webkit-tap-highlight-color: transparent;
+}
+.mode-seg + .mode-seg { border-left: 1px solid var(--tile-filled-border); }
+.mode-seg[aria-pressed="true"] { background: var(--accent); color: var(--bg); }
+@media (hover: hover) {
+  .mode-seg:not([aria-pressed="true"]):hover { color: var(--text); }
+}
+
+/* ============ ABC board (the whole name on one line, word-spaced) ============ */
+
+/* ABC needs more width than ID's 8-tile board (names run to ~25 tiles), so its
+   face gets a wider main; the flip axis stays screen-centred either way */
+#face-abc main { max-width: min(64rem, 100%); }
+
+.abc-board {
+  /* size tiles so the entire name fits ONE line within the available width
+     (capped at 3rem, floored at 1.5rem — longer than that and the board just
+     scrolls). cols = total tiles, wgaps = extra between-word gaps, both set
+     from JS. width = cols*tile + (cols-1)*tile-gap + wgaps*0.5rem */
+  --abc-tile-size: clamp(1.5rem,
+    calc((min(100vw - 1.5rem, 60rem) - (var(--abc-cols) - 1) * var(--tile-gap)
+      - var(--abc-wgaps) * 0.5rem) / var(--abc-cols)),
+    3rem);
+  align-items: center;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+.abc-row {
+  display: flex;
+  flex-wrap: nowrap;               /* the name stays on one line */
+  width: max-content;
+  justify-content: center;
+  gap: calc(var(--tile-gap) + 0.5rem); /* between-word gap */
+  touch-action: manipulation;
+}
+.abc-word { display: flex; gap: var(--tile-gap); }
+
+.abc-board .tile {
+  width: var(--abc-tile-size);
+  height: var(--abc-tile-size);
+  font-size: calc(var(--abc-tile-size) * 0.5);
+}
+/* spaces are gaps; apostrophes / hyphens are shown but not typed or scored */
+.abc-board .tile.fixed {
+  border-color: transparent;
+  background: transparent;
+  color: var(--dim);
+  font-weight: 400;
+}
+
+/* a guessed row that matches a real named object is clickable (sky view) */
+.abc-row.guessed { cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.abc-row.viewing {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 2px;
+}
+@media (hover: hover) {
+  .abc-row.guessed:hover .tile:not(.fixed) { filter: brightness(1.2); }
+}
+
+/* ABC's bottom key row is Enter + 7 letters + Back (9 keys), so its wide keys
+   must scale with the fluid key size rather than ID mode's fixed 3.9rem
+   (which would overflow narrow phones) */
+#abc-keyboard .key.wide {
+  min-width: calc(var(--key-size) * 1.5);
+  padding: 0 0.15rem;
+  font-size: 0.7rem;
 }

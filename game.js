@@ -400,9 +400,11 @@ const MIN_FOV = 0.03;
 const panelEl = document.getElementById("object-panel");
 const captionEl = document.getElementById("object-caption");
 const aladinDiv = document.getElementById("aladin-lite-div");
+const surveyPickerEl = document.getElementById("survey-picker");
 
 let shownId = null;    // catalogue id currently in the object panel, or null
 let aladinView = null; // Aladin Lite instance, reused when switching objects
+let surveyCtl = null;  // survey picker controller (surveys.js), built on first show
 
 // "NGC0042" -> "NGC 42", "IC1023A" -> "IC 1023A"
 function simbadIdent(id) {
@@ -588,13 +590,20 @@ function showObject(id) {
   markShownRow();
 
   if (panelEl.hidden) {
-    // the viewer box matches the height of the six guess rows,
-    // capped to the viewport width on narrow (phone) screens
-    const size = Math.min(boardEl.offsetHeight,
-      document.documentElement.clientWidth - 16);
+    // the viewer box matches the height of the six guess rows, capped to the
+    // viewport width on narrow screens — leaving room for the survey picker
+    // column beside it (its square buttons are ~ size / N wide)
+    const n = window.MuldleSurveys ? window.MuldleSurveys.count : 0;
+    const maxByWidth = n
+      ? (document.documentElement.clientWidth - 16 - 7) / (1 + 1 / n)
+      : document.documentElement.clientWidth - 16;
+    const size = Math.min(boardEl.offsetHeight, maxByWidth);
     aladinDiv.style.width = size + "px";
     aladinDiv.style.height = size + "px";
     panelEl.hidden = false;
+    if (window.MuldleSurveys && !surveyCtl) {
+      surveyCtl = window.MuldleSurveys.mount(surveyPickerEl, () => aladinView);
+    }
   }
 
   const ident = simbadIdent(id);
@@ -614,7 +623,7 @@ function showObject(id) {
         aladinView.setFov(info.fov);
       } else {
         aladinView = A.aladin("#aladin-lite-div", {
-          survey: "P/DSS2/color",
+          survey: surveyCtl ? surveyCtl.current() : "P/DSS2/color",
           target: pos[0] + " " + pos[1],
           fov: info.fov,
           showFullscreenControl: false,
@@ -623,6 +632,10 @@ function showObject(id) {
           showCooGridControl: false,
           showProjectionControl: false,
         });
+      }
+      if (surveyCtl) {
+        surveyCtl.apply(aladinView);
+        window.MuldleSurveys.updateCoverage(surveyCtl, pos[0], pos[1]);
       }
       renderCaption(id, ident, info.otype, info.found);
     })
@@ -722,6 +735,7 @@ function submitGuess() {
 }
 
 document.addEventListener("keydown", (e) => {
+  if (window.__muldleMode && window.__muldleMode !== "id") return; // ABC face active
   if (settingsDialog.open) return;
   if (e.ctrlKey || e.metaKey || e.altKey) return;
   if (e.key === "Enter") { handleKey("Enter"); }

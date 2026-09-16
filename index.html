@@ -9,9 +9,24 @@
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 </head>
 <body>
+
+<!-- The whole game flips around a central vertical axis between two modes:
+     face-id (guess the NGC/IC identifier) and face-abc (guess the object's
+     common name). Both faces are live; the settings dialog stays outside the
+     3D context (it renders in the top layer anyway). -->
+<div id="flip-scene">
+<div id="flipper">
+
+<section class="face" id="face-id">
 <header>
   <button id="settings-button" class="settings-button" aria-label="Settings" title="Settings">⚙</button>
-  <h1>MULDLE <span class="mul-glyph" title="MUL 𒀯 — Sumerian for 'star'">𒀯</span></h1>
+  <div class="title-row">
+    <h1>MULDLE <span class="mul-glyph" title="MUL 𒀯 — Sumerian for 'star'">𒀯</span></h1>
+    <div class="mode-toggle" role="group" aria-label="Game mode">
+      <button type="button" class="mode-seg" data-mode="id" aria-pressed="true">ID</button>
+      <button type="button" class="mode-seg" data-mode="abc" aria-pressed="false">ABC</button>
+    </div>
+  </div>
   <p class="tagline">Find the astronomical object name or identifier.</p>
   <p class="puzzle-info" id="puzzle-info"></p>
 </header>
@@ -21,7 +36,10 @@
     <aside id="hint-panel" class="hint-panel" aria-label="object hints"></aside>
     <div id="board" class="board" aria-label="game board"></div>
     <aside id="object-panel" class="object-panel" hidden>
-      <div id="aladin-lite-div"></div>
+      <div class="viewer-row">
+        <div id="aladin-lite-div"></div>
+        <div id="survey-picker" class="survey-picker" aria-label="sky survey"></div>
+      </div>
       <p id="object-caption" class="object-caption"></p>
     </aside>
   </div>
@@ -62,6 +80,8 @@
     characters may not be used again. Since greens are locked in anyway,
     each new row starts with them already filled; typing fills the
     remaining tiles and Backspace skips the greens.</p>
+    <p>Switch to <strong>ABC</strong> mode (toggle by the title) to guess the
+    object's common name instead of its catalogue number.</p>
     <p>A new puzzle appears every day at midnight (local time).</p>
     <p class="about-name">MUL <span class="mul-glyph">𒀯</span> — Sumerian for
     &ldquo;star&rdquo;, after the oldest known star catalogues: the Babylonian
@@ -69,6 +89,61 @@
     century BC) and their successor MUL.APIN.</p>
   </details>
 </main>
+</section>
+
+<section class="face" id="face-abc" aria-hidden="true" inert>
+<header>
+  <button id="abc-settings-button" class="settings-button" aria-label="Settings" title="Settings">⚙</button>
+  <div class="title-row">
+    <h1>MULDLE <span class="mul-glyph" title="MUL 𒀯 — Sumerian for 'star'">𒀯</span></h1>
+    <div class="mode-toggle" role="group" aria-label="Game mode">
+      <button type="button" class="mode-seg" data-mode="id" aria-pressed="false">ID</button>
+      <button type="button" class="mode-seg" data-mode="abc" aria-pressed="true">ABC</button>
+    </div>
+  </div>
+  <p class="tagline">Name today's deep-sky object.</p>
+  <p class="puzzle-info" id="abc-puzzle-info"></p>
+</header>
+
+<main>
+  <div class="board-area">
+    <div id="abc-board" class="board abc-board" aria-label="name board"></div>
+    <aside id="abc-object-panel" class="object-panel" hidden>
+      <div class="viewer-row">
+        <div id="abc-aladin-div"></div>
+        <div id="abc-survey-picker" class="survey-picker" aria-label="sky survey"></div>
+      </div>
+      <p id="abc-object-caption" class="object-caption"></p>
+    </aside>
+  </div>
+
+  <div id="abc-message" class="message" role="status"></div>
+
+  <div id="abc-keyboard" class="keyboard"></div>
+
+  <details class="help">
+    <summary>How to play</summary>
+    <p>Guess the common name of today's deep-sky object in 6 tries &mdash;
+    e.g. <code>ORION NEBULA</code>, <code>SOMBRERO GALAXY</code>. Only well-known
+    named objects appear here, so the pool is much smaller than in ID mode.</p>
+    <p>Type letters (and, rarely, digits); spaces, hyphens and apostrophes are
+    filled in for you. Fill every tile, then hit Enter.</p>
+    <p>After each guess the tiles show how close you are:
+    <span class="mini correct">green</span> = right letter, right place;
+    <span class="mini present">yellow</span> = in the name, wrong place;
+    <span class="mini absent">grey</span> = not in the name.</p>
+    <p><strong>Hard mode</strong> (toggle in settings ⚙, in ID mode) applies
+    here too: revealed greens stay put and are pre-filled, yellows must be
+    reused, greys may not.</p>
+    <p>Switch back to <strong>ID</strong> mode (toggle by the title) to guess
+    the catalogue number instead.</p>
+    <p>A new puzzle appears every day at midnight (local time).</p>
+  </details>
+</main>
+</section>
+
+</div><!-- #flipper -->
+</div><!-- #flip-scene -->
 
 <dialog id="settings-dialog" class="settings-dialog">
   <button id="settings-close" class="settings-close" aria-label="Close">×</button>
@@ -89,13 +164,17 @@
 <footer>
   <p>Identifiers from <a href="https://cdsarc.cds.unistra.fr/viz-bin/cat/VII/239A" target="_blank" rel="noopener">VizieR VII/239A</a> (Corwin, 2004);
   object data from <a href="https://simbad.cds.unistra.fr/" target="_blank" rel="noopener">SIMBAD</a>;
-  sky view by <a href="https://aladin.cds.unistra.fr/AladinLite/" target="_blank" rel="noopener">Aladin Lite</a> — all CDS, Strasbourg.</p>
+  sky view by <a href="https://aladin.cds.unistra.fr/AladinLite/" target="_blank" rel="noopener">Aladin Lite</a> — all CDS, Strasbourg.
+  Common names via SIMBAD, <a href="https://github.com/mattiaverga/OpenNGC" target="_blank" rel="noopener">OpenNGC</a> and Wikipedia.</p>
   <p>Inspired by <a href="https://www.nytimes.com/games/wordle/" target="_blank" rel="noopener">Wordle</a> (no affiliation).
   <a href="https://github.com/bertblookers/muldle" target="_blank" rel="noopener">Source</a> (AGPL-3.0) ·
   <a href="https://github.com/bertblookers/muldle/blob/main/ATTRIBUTION.md" target="_blank" rel="noopener">Data credits</a></p>
 </footer>
 
 <script src="data.js"></script>
+<script src="names.js"></script>
+<script src="surveys.js"></script>
 <script src="game.js"></script>
+<script src="abc.js"></script>
 </body>
 </html>

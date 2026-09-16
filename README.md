@@ -51,8 +51,8 @@ with no affiliation to or endorsement by Josh Wardle or The New York Times.
 The astronomical data is not covered by the code license and is credited to
 its sources — see [ATTRIBUTION.md](ATTRIBUTION.md) for the full list
 (VizieR catalogues VII/239A and VI/42, SIMBAD, Aladin Lite — all CDS,
-Strasbourg — and the Noto Sans Cuneiform font). `data.js` is generated from
-the VizieR tables.
+Strasbourg — common names from SIMBAD, OpenNGC and Wikipedia, and the Noto
+Sans Cuneiform font). `data.js` is generated from the VizieR tables.
 
 ## License
 
