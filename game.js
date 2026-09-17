@@ -163,8 +163,18 @@ function hardModeViolation(prevGuesses, answer, guess) {
       }
     }
     for (let i = 0; i < WORD_LEN; i++) {
-      if (score[i] === "present" && !guess.includes(prev[i])) {
+      if (score[i] !== "present") continue;
+      // a yellow char must be reused somewhere...
+      if (!guess.includes(prev[i])) {
         return `Hard mode: guess must contain ${prev[i]}`;
+      }
+      // ...but not back in the tile it was yellow in — a yellow at i always
+      // means "this char is in the identifier, but not at position i" (sound
+      // even with duplicate chars)
+      if (guess[i] === prev[i]) {
+        return prev[i] === BLANK
+          ? `Hard mode: tile ${i + 1} must not be blank`
+          : `Hard mode: tile ${i + 1} is not ${prev[i]}`;
       }
     }
     for (let i = 0; i < WORD_LEN; i++) {

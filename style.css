@@ -502,8 +502,17 @@ footer a { color: var(--accent); }
 /* ============ ID <-> ABC mode flip ============ */
 
 /* The whole game is a card flipping around a central vertical axis: face-id on
-   the front, face-abc on the back. Both faces stay in the DOM (stacked in one
-   grid cell so the scene is as tall as the taller face). */
+   the front, face-abc on the back. Both faces stay in the DOM, stacked on top
+   of each other.
+
+   We do NOT rely on backface-visibility to hide the rotated-away face:
+   Firefox/LibreWolf don't cull the backface here (it showed through mirrored
+   beneath the active face — the reported bug), and even a non-grid 3D context
+   doesn't restore culling in that engine. Instead the away face is hidden
+   outright (.face-back), and during an animated flip that show/hide is deferred
+   to the halfway point (.flip-anim, edge-on) so the outgoing face rotates fully
+   away before the incoming one appears — a clean flip in every browser.
+   backface-visibility:hidden is kept as a harmless extra where it does work. */
 #flip-scene {
   width: 100%;
   display: flex;
@@ -512,7 +521,7 @@ footer a { color: var(--accent); }
   perspective-origin: 50% 40%;
 }
 #flipper {
-  display: grid;
+  position: relative;        /* the preserve-3d element stays a plain block */
   width: 100%;
   transform-style: preserve-3d;
   transition: transform 0.85s cubic-bezier(0.45, 0.05, 0.2, 1);
@@ -524,14 +533,25 @@ footer a { color: var(--accent); }
 #flipper.no-anim { transition: none; }
 
 .face {
-  grid-area: 1 / 1;          /* stack both faces in the same cell */
+  position: absolute;        /* stack both faces at the same spot */
+  top: 0;
+  left: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
   width: 100%;
   min-width: 0;
   backface-visibility: hidden;
+  transition: visibility 0s linear 0s;
 }
+/* the active face flows normally so #flipper (and the footer below it) is as
+   tall as whichever face is showing; the other face overlays it absolutely */
+.face.face-active { position: relative; }
+/* the face currently rotated away is hidden so it can't ghost through */
+.face.face-back { visibility: hidden; }
+/* during an animated flip, defer each face's show/hide to the flip's midpoint
+   (0.85s / 2), i.e. when the card is edge-on and both faces are ~invisible */
+#flipper.flip-anim .face { transition-delay: 0.425s; }
 #face-abc { transform: rotateY(180deg); }
 
 @media (prefers-reduced-motion: reduce) {

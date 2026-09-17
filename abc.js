@@ -70,8 +70,14 @@ function hardModeViolation(prevGuesses, answer, guess) {
         return `Hard mode: keep ${prev[i]} in place`;
     }
     for (let i = 0; i < answer.length; i++) {
-      if (score[i] === "present" && !guess.includes(prev[i]))
+      if (score[i] !== "present") continue;
+      // a yellow char must be reused somewhere...
+      if (!guess.includes(prev[i]))
         return `Hard mode: name must contain ${prev[i]}`;
+      // ...but not back in the same tile — a yellow at i means "in the name,
+      // but not at position i" (holds even with repeated letters)
+      if (guess[i] === prev[i])
+        return `Hard mode: ${prev[i]} is not in that spot`;
     }
     for (let i = 0; i < answer.length; i++) {
       const r = KEY_RANK[score[i]];
@@ -585,7 +591,11 @@ function randomEntry() {
 // claim the click (stopPropagation keeps it from reaching game.js / ID mode).
 settingsDialog.addEventListener("click", (e) => {
   if (window.__muldleMode !== "abc") return; // let game.js handle it in ID mode
-  const id = e.target && e.target.id;
+  // each action button wraps a description <span>; a click can land on it, so
+  // resolve to the enclosing button rather than reading e.target.id directly
+  // (otherwise the click falls through to game.js and resets the ID puzzle)
+  const btn = e.target && e.target.closest && e.target.closest("button");
+  const id = btn && btn.id;
   if (id === "reset-puzzle") {
     e.stopPropagation();
     startAbcPuzzle(activeName, activeId, !!randomName, "Puzzle reset — same object, fresh guesses.");
@@ -639,14 +649,34 @@ function setInert(el, on) {
 function applyMode(m, animate) {
   mode = m;
   window.__muldleMode = m;
+  // the active face flows (drives #flipper's height); the other overlays it
+  faceId.classList.toggle("face-active", m === "id");
+  faceAbc.classList.toggle("face-active", m === "abc");
+  // a transition only runs when we animate AND motion isn't reduced; when it
+  // does, .flip-anim defers each face's show/hide to the midpoint so neither
+  // ghosts through (Firefox doesn't cull the backface — see style.css)
+  const willAnimate = animate && !(window.matchMedia &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+  flipper.classList.toggle("flip-anim", willAnimate);
   if (!animate) flipper.classList.add("no-anim");
   flipper.classList.toggle("flipped", m === "abc");
   if (!animate) { void flipper.offsetWidth; flipper.classList.remove("no-anim"); }
+  // hide whichever face is now rotated away (deferred to the flip midpoint by
+  // .flip-anim when animating, instant otherwise)
+  faceId.classList.toggle("face-back", m !== "id");
+  faceAbc.classList.toggle("face-back", m !== "abc");
   setInert(faceId, m !== "id");
   setInert(faceAbc, m !== "abc");
   document.querySelectorAll(".mode-seg").forEach(b =>
     b.setAttribute("aria-pressed", String(b.dataset.mode === m)));
 }
+
+// once the spin settles, drop the midpoint delay (steady-state visibility is
+// already correct, so this changes nothing visible)
+flipper.addEventListener("transitionend", (e) => {
+  if (e.target === flipper && e.propertyName === "transform")
+    flipper.classList.remove("flip-anim");
+});
 
 function setMode(m) {
   if (m === mode) return;
