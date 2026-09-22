@@ -52,6 +52,7 @@
   <div id="message" class="message" role="status"></div>
 
   <div id="post-game" class="post-game" hidden>
+    <div id="post-game-stats" class="post-game-stats"></div>
     <button id="share-button" class="share-button" type="button">Share result</button>
     <p id="countdown" class="countdown" aria-live="off"></p>
   </div>
@@ -135,6 +136,7 @@
   <div id="abc-message" class="message" role="status"></div>
 
   <div id="abc-post-game" class="post-game" hidden>
+    <div id="abc-post-game-stats" class="post-game-stats"></div>
     <button id="abc-share-button" class="share-button" type="button">Share result</button>
     <p id="abc-countdown" class="countdown" aria-live="off"></p>
   </div>
@@ -173,12 +175,19 @@
     <span class="settings-toggle-text">Hard mode
       <span>revealed hints must be used in subsequent guesses</span></span>
   </label>
+  <button id="stats-button" class="settings-action">Stats &amp; history
+    <span>your local results — win %, streaks, past puzzles</span></button>
   <button id="reset-puzzle" class="settings-action">Reset puzzle
     <span>replay the current puzzle from scratch</span></button>
   <button id="reset-random" class="settings-action">Reset to random object
     <span>practice on a random NGC object instead of today's</span></button>
   <button id="back-to-daily" class="settings-action" hidden>Back to today's puzzle
     <span>leave random mode (current guesses are discarded)</span></button>
+</dialog>
+
+<dialog id="stats-dialog" class="settings-dialog stats-dialog">
+  <button id="stats-close" class="settings-close" aria-label="Close">×</button>
+  <div id="stats-content"></div>
 </dialog>
 
 <footer>

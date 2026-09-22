@@ -20,6 +20,25 @@ to find its identifier, e.g. `NGC0042` or `IC1023A`.
 - **Hard mode** is on by default: revealed hints must be used in subsequent
   guesses, and greyed-out characters may not be reused.
 
+## Modes
+
+Toggle by the title between two modes, each with its own daily puzzle:
+
+- **ID** — guess the catalogue identifier (the default, described above).
+- **ABC** — guess the object's well-known common name (e.g. `ORION NEBULA`) as
+  a Wordle over its letters.
+
+## More
+
+- **Puzzle navigator** — the `«` · `Puzzle #N` · `»` control by the title
+  browses and plays past puzzles; deep-links are shareable (`?p=N`).
+- **Stats & history** (in the settings menu ⚙) — games played, win %, current
+  and max streak, and your guess distribution, plus a list of the puzzles
+  you've played. Everything is kept only in your own browser; nothing is ever
+  sent anywhere.
+- **Share** your result as an emoji grid, and watch a countdown to the next
+  puzzle.
+
 ## Run locally
 
 It's a static site — serve the repo root with any web server, e.g.:

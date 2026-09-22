@@ -95,7 +95,10 @@ function hardModeViolation(prevGuesses, answer, guess) {
 const MAX_GUESSES = 6;
 // ABC has its own seed/order so the two modes' daily sequences don't correlate
 const ABC_SEED = 20260916;
-const ABC_EPOCH = { y: 2026, m: 9, d: 8 }; // day 0 of the ABC order
+// ABC mode launched 2026-09-16 (commit 8f45950), so its puzzle #0 is that day —
+// its own epoch, independent of ID mode's 2026-09-08 start. (Was mistakenly
+// 09-08, which made ABC read the same puzzle number as ID.)
+const ABC_EPOCH = { y: 2026, m: 9, d: 16 }; // 2026-09-16 = ABC puzzle #0
 const SETTINGS_KEY = "muldle-settings-v1"; // shared with game.js (read-only here)
 const ABC_STORAGE_KEY = "muldle-abc-v1";
 // off-day puzzles browsed via the navigator, keyed by number: { [day]: guesses[] }.
@@ -238,11 +241,14 @@ function loadTodayAbcGuesses() {
   return [];
 }
 
+// off-day guesses for <day>: the navigator's archive store, or — for a past
+// daily played live but never replayed here — the persistent results store
 function loadArchivedAbcGuesses(day) {
+  const valid = g => typeof g === "string" && g.length === ANSWER.length;
   const gs = loadAbcArchive()[day];
-  return Array.isArray(gs)
-    ? gs.filter(g => typeof g === "string" && g.length === ANSWER.length)
-    : [];
+  if (Array.isArray(gs)) return gs.filter(valid);
+  const rec = loadAbcResults()[day];
+  return rec && Array.isArray(rec.guesses) ? rec.guesses.filter(valid) : [];
 }
 
 function loadState() {
@@ -257,6 +263,104 @@ function loadState() {
       guesses = s.guesses.filter(g => typeof g === "string" && g.length === ANSWER.length);
     }
   } catch (e) { /* corrupt: start fresh */ }
+}
+
+/* ============ local play history + stats (no backend) ============ */
+
+// Persistent ABC results, keyed by puzzle number (mirrors game.js's ID store):
+//   { [day]: { guesses, solved, tries, playedOnDay } }. Outlives day rollover;
+// a finished daily is recorded at finish and migrated from a stale
+// muldle-abc-v1 on load. Local-only — nothing is transmitted.
+const ABC_RESULTS_KEY = "muldle-abc-results-v1";
+
+function loadAbcResults() {
+  try {
+    const r = JSON.parse(localStorage.getItem(ABC_RESULTS_KEY));
+    return r && typeof r === "object" ? r : {};
+  } catch (e) { return {}; }
+}
+function saveAbcResults(store) {
+  try { localStorage.setItem(ABC_RESULTS_KEY, JSON.stringify(store)); } catch (e) { /* quota */ }
+}
+
+// A live-daily record (playedOnDay) is canonical & permanent — never overwritten
+// by a later archive replay or a reset-and-replay.
+function recordAbcResult(day, entry) {
+  const store = loadAbcResults();
+  if (store[day] && store[day].playedOnDay) return;
+  store[day] = entry;
+  saveAbcResults(store);
+}
+
+// Snapshot the just-finished puzzle. Random practice has no number → not recorded.
+function recordCurrentAbcResult(solved) {
+  if (randomName) return;
+  recordAbcResult(abcViewDay, {
+    guesses: guesses.slice(),
+    solved,
+    tries: solved ? guesses.length : null,
+    playedOnDay: abcViewDay === DAY,
+  });
+}
+
+// Drop results/archive entries for impossible puzzle numbers (day > today or a
+// bad key). Self-heals stale ABC data left after the epoch fix (which re-indexed
+// ABC's day→answer), so stats/history never show future numbers like #14.
+function pruneFutureAbcEntries(key) {
+  try {
+    const store = JSON.parse(localStorage.getItem(key));
+    if (!store || typeof store !== "object") return;
+    let changed = false;
+    for (const k of Object.keys(store)) {
+      const d = Number(k);
+      if (!Number.isInteger(d) || d < 0 || d > DAY) { delete store[k]; changed = true; }
+    }
+    if (changed) localStorage.setItem(key, JSON.stringify(store));
+  } catch (e) { /* corrupt: leave it */ }
+}
+
+// Rescue a finished daily left in muldle-abc-v1 from a previous day before
+// loadState() would ignore it (day rollover). Runs once on load.
+function migrateStaleAbcDaily() {
+  try {
+    const s = JSON.parse(localStorage.getItem(ABC_STORAGE_KEY));
+    if (!s || typeof s.day !== "number" || s.day >= DAY || s.randomName) return;
+    if (typeof s.name !== "string" || !Array.isArray(s.guesses)) return;
+    const ans = buildAnswerModel(s.name).answer;
+    const gs = s.guesses.filter(g => typeof g === "string" && g.length === ans.length);
+    if (!gs.length) return;
+    const solved = gs[gs.length - 1] === ans;
+    if (!solved && gs.length < MAX_GUESSES) return; // unfinished
+    recordAbcResult(s.day, { guesses: gs, solved, tries: solved ? gs.length : null, playedOnDay: true });
+  } catch (e) { /* nothing to migrate */ }
+}
+
+// streaks count consecutive on-day dailies only; archive replays don't extend
+// them (played / win % / distribution cover every saved puzzle — see below)
+function abcCurrentStreak(store) {
+  const t = store[DAY];
+  if (t && t.playedOnDay && !t.solved) return 0;
+  const start = (t && t.playedOnDay && t.solved) ? DAY : DAY - 1;
+  let n = 0;
+  for (let d = start; d >= 0; d--) {
+    const e = store[d];
+    if (e && e.playedOnDay && e.solved) n++; else break;
+  }
+  return n;
+}
+function computeAbcStats() {
+  const store = loadAbcResults();
+  // played / win % / distribution cover EVERY saved puzzle (dailies + archive),
+  // matching the history list; only streaks are daily-only
+  const all = Object.keys(store).map(Number).filter(d => d >= 0 && d <= DAY && store[d]);
+  const solved = all.filter(d => store[d].solved);
+  const dist = [0, 0, 0, 0, 0, 0];
+  for (const d of solved) { const t = store[d].tries; if (t >= 1 && t <= MAX_GUESSES) dist[t - 1]++; }
+  const dailySolved = all.filter(d => store[d].playedOnDay && store[d].solved).sort((a, b) => a - b);
+  let max = 0, run = 0, prev = null;
+  for (const d of dailySolved) { run = (prev !== null && d === prev + 1) ? run + 1 : 1; if (run > max) max = run; prev = d; }
+  const played = all.length, wins = solved.length;
+  return { played, wins, winPct: played ? Math.round((100 * wins) / played) : 0, dist, cur: abcCurrentStreak(store), max };
 }
 
 /* ============ DOM ============ */
@@ -589,6 +693,12 @@ function handleKey(k) {
     return;
   }
   if (!/^[0-9A-Z]$/.test(k)) return;
+  // hard mode bans greyed-out characters (absent everywhere tried) at type time,
+  // not only on Enter — the key carries .absent exactly when it is grey
+  if (isHardMode() && keyEls[k] && keyEls[k].classList.contains("absent")) {
+    showMessage(`Hard mode: there is no ${k} in the name`);
+    return;
+  }
   for (let i = 0; i < MODEL.slots.length; i++) {
     if (MODEL.slots[i].playable && current[i] === undefined) {
       current[i] = k; renderCurrent(); return;
@@ -616,11 +726,13 @@ function submitGuess() {
 
   if (guess === ANSWER) {
     finished = true;
+    recordCurrentAbcResult(true);
     showMessage(`${WIN_MESSAGES[guesses.length - 1]} It was the ${activeName}.`, true);
     showObject(activeId);
     showPostGame();
   } else if (guesses.length >= MAX_GUESSES) {
     finished = true;
+    recordCurrentAbcResult(false);
     showMessage(`Out of guesses — it was the ${activeName}.`, true);
     showObject(activeId);
     showPostGame();
@@ -631,7 +743,7 @@ function submitGuess() {
 
 document.addEventListener("keydown", (e) => {
   if (window.__muldleMode !== "abc") return;
-  if (settingsDialog.open) return;
+  if (settingsDialog.open || statsDialog.open) return;
   if (e.ctrlKey || e.metaKey || e.altKey) return;
   if (e.key === "Enter") handleKey("Enter");
   else if (e.key === "Backspace") handleKey("Back");
@@ -645,6 +757,8 @@ const settingsDialog = document.getElementById("settings-dialog");
 const backToDailyBtn = document.getElementById("back-to-daily");
 const hardModeToggle = document.getElementById("hard-mode-toggle");
 const abcSettingsBtn = document.getElementById("abc-settings-button");
+const statsDialog = document.getElementById("stats-dialog");
+const statsContent = document.getElementById("stats-content");
 
 abcSettingsBtn.addEventListener("click", () => {
   backToDailyBtn.hidden = !randomName;
@@ -688,11 +802,13 @@ function renderAbcState() {
   finished = false;
   if (guesses.length && guesses[guesses.length - 1] === ANSWER) {
     finished = true;
+    recordCurrentAbcResult(true);
     showMessage(`Already solved — it was the ${activeName}.`, true);
     showObject(activeId);
     showPostGame();
   } else if (guesses.length >= MAX_GUESSES) {
     finished = true;
+    recordCurrentAbcResult(false);
     showMessage(`Out of guesses — it was the ${activeName}.`, true);
     showObject(activeId);
     showPostGame();
@@ -753,8 +869,113 @@ settingsDialog.addEventListener("click", (e) => {
   } else if (id === "back-to-daily") {
     e.stopPropagation();
     goToAbcPuzzle(DAY);
+  } else if (id === "stats-button") {
+    e.stopPropagation();
+    openAbcStats();
   }
 }, true);
+
+/* ============ stats & history (ABC) — rendered into the shared dialog ======= */
+
+function abcStatTile(label, value) {
+  const t = document.createElement("div"); t.className = "stat-tile";
+  const v = document.createElement("div"); v.className = "stat-val"; v.textContent = String(value);
+  const l = document.createElement("div"); l.className = "stat-label"; l.textContent = label;
+  t.append(v, l);
+  return t;
+}
+
+// Render the ABC stats + history into <container>. includeClear:false (the
+// inline post-game view below a finished board) omits the clear control + note.
+function renderAbcStats(container, { includeClear = true } = {}) {
+  const s = computeAbcStats();
+  const store = loadAbcResults();
+  container.replaceChildren();
+
+  const h = document.createElement("h2"); h.textContent = "Stats & history — ABC";
+  container.appendChild(h);
+
+  const tiles = document.createElement("div"); tiles.className = "stats-tiles";
+  tiles.append(
+    abcStatTile("Played", s.played),
+    abcStatTile("Win %", s.winPct),
+    abcStatTile("Streak", s.cur),
+    abcStatTile("Max streak", s.max),
+  );
+  container.appendChild(tiles);
+
+  const distHead = document.createElement("h3"); distHead.textContent = "Guess distribution";
+  container.appendChild(distHead);
+  const dist = document.createElement("div"); dist.className = "stats-dist";
+  const maxCount = Math.max(1, ...s.dist);
+  const todayTries = (store[DAY] && store[DAY].playedOnDay && store[DAY].solved) ? store[DAY].tries : null;
+  s.dist.forEach((count, i) => {
+    const row = document.createElement("div"); row.className = "dist-row";
+    const num = document.createElement("span"); num.className = "dist-num"; num.textContent = String(i + 1);
+    const bar = document.createElement("span"); bar.className = "dist-bar";
+    if (i + 1 === todayTries) bar.classList.add("current");
+    bar.style.width = (count / maxCount) * 100 + "%";
+    bar.textContent = String(count);
+    row.append(num, bar);
+    dist.appendChild(row);
+  });
+  container.appendChild(dist);
+
+  const histHead = document.createElement("h3"); histHead.textContent = "History";
+  container.appendChild(histHead);
+  const days = Object.keys(store).map(Number).filter(d => d <= DAY).sort((a, b) => b - a);
+  if (!days.length) {
+    const empty = document.createElement("p"); empty.className = "stats-empty";
+    empty.textContent = "No games recorded yet — finish a puzzle and it shows up here.";
+    container.appendChild(empty);
+  } else {
+    const list = document.createElement("div"); list.className = "history-list";
+    for (const d of days) {
+      const e = store[d];
+      const row = document.createElement("button");
+      row.type = "button"; row.className = "history-row";
+      row.title = "Open puzzle #" + d;
+      row.addEventListener("click", () => { statsDialog.close(); goToAbcPuzzle(d); });
+      const swatch = document.createElement("span");
+      swatch.className = "history-swatch " + (e.solved ? "solved" : "lost");
+      const label = document.createElement("span"); label.className = "history-label";
+      label.textContent = "Puzzle #" + d;
+      const outcome = document.createElement("span"); outcome.className = "history-outcome";
+      outcome.textContent = (e.solved ? e.tries : "X") + "/" + MAX_GUESSES;
+      row.append(swatch, label, outcome);
+      if (!e.playedOnDay) {
+        const tag = document.createElement("span"); tag.className = "history-tag"; tag.textContent = "archive";
+        row.appendChild(tag);
+      }
+      list.appendChild(row);
+    }
+    container.appendChild(list);
+  }
+
+  if (!includeClear) return;
+
+  const note = document.createElement("p"); note.className = "stats-note";
+  note.textContent = "Stored only in this browser — nothing is ever sent anywhere.";
+  container.appendChild(note);
+
+  const clearBtn = document.createElement("button");
+  clearBtn.type = "button"; clearBtn.className = "stats-clear";
+  clearBtn.textContent = "Clear history & stats";
+  let armed = false;
+  clearBtn.addEventListener("click", () => {
+    if (!armed) { armed = true; clearBtn.textContent = "Click again to clear — can't be undone"; clearBtn.classList.add("armed"); return; }
+    // also drop today's saved game so a finished daily isn't re-recorded on load
+    try {
+      localStorage.removeItem(ABC_RESULTS_KEY);
+      localStorage.removeItem(ABC_ARCHIVE_KEY);
+      localStorage.removeItem(ABC_STORAGE_KEY);
+    } catch (e) { /* ignore */ }
+    renderAbcStats(container, { includeClear });
+  });
+  container.appendChild(clearBtn);
+}
+
+function openAbcStats() { settingsDialog.close(); renderAbcStats(statsContent); statsDialog.showModal(); }
 
 // puzzle navigator (ABC): step through past puzzles (clamped to <= today), or
 // the middle button jumps straight back to today's
@@ -765,6 +986,7 @@ navTodayBtn.addEventListener("click", () => { if (abcViewDay !== DAY) goToAbcPuz
 /* ============ post-game: emoji-grid share + next-puzzle countdown ============ */
 
 const postGameEl = document.getElementById("abc-post-game");
+const postGameStatsEl = document.getElementById("abc-post-game-stats");
 const shareBtn = document.getElementById("abc-share-button");
 const countdownEl = document.getElementById("abc-countdown");
 const SHARE_EMOJI = { correct: "🟩", present: "🟨", absent: "⬛" };
@@ -829,6 +1051,10 @@ function startCountdown() {
 
 function showPostGame() {
   postGameEl.hidden = false;
+  // the keyboard is no use once the puzzle is over — hide it and surface the
+  // stats & history (no clear control) below the board in its place
+  keyboardEl.hidden = true;
+  renderAbcStats(postGameStatsEl, { includeClear: false });
   // countdown only for today's daily — a practice or archived puzzle doesn't roll over
   const isDaily = !randomName && abcViewDay === DAY;
   countdownEl.hidden = !isDaily;
@@ -838,10 +1064,15 @@ function showPostGame() {
 
 function hidePostGame() {
   postGameEl.hidden = true;
+  keyboardEl.hidden = false; // back to an unfinished puzzle: keyboard returns
   clearInterval(countdownTimer);
 }
 
 /* ============ init ============ */
+
+pruneFutureAbcEntries(ABC_RESULTS_KEY); // drop stale entries from the epoch re-index
+pruneFutureAbcEntries(ABC_ARCHIVE_KEY);
+migrateStaleAbcDaily(); // rescue a finished daily from a past day before it's lost
 
 // initial puzzle: a ?p=<day> for the active mode opens that archived puzzle;
 // otherwise restore today's daily (or the random object) from muldle-abc-v1
@@ -854,7 +1085,13 @@ if (urlDay != null && urlDay !== DAY && activeModeOnLoad() === "abc") {
 } else {
   loadState();
 }
-if (window.__muldle) window.__muldle.view.abc = abcViewDay;
+if (window.__muldle) {
+  // ABC's today is its own puzzle number (its epoch differs from ID's), so
+  // register it for syncUrl's per-mode "is this today?" check
+  window.__muldle.today = window.__muldle.today || {};
+  window.__muldle.today.abc = DAY;
+  window.__muldle.view.abc = abcViewDay;
+}
 
 window.__abc = { get NAME() { return activeName; }, get ANSWER() { return ANSWER; },
   DAY, POOL, get viewDay() { return abcViewDay; }, get model() { return MODEL; } }; // e2e/debug hook

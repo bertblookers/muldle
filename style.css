@@ -520,6 +520,128 @@ footer a { color: var(--accent); }
 }
 .settings-close:hover { color: var(--text); }
 
+/* ---- stats & history (shared by the settings dialog + the inline post-game
+   view rendered below a finished board) ---- */
+.stats-dialog { width: min(24rem, 94vw); }
+/* inline copy: same content, no clear control; sized to the board area */
+.post-game-stats {
+  width: min(24rem, 94vw);
+  text-align: left;
+}
+.post-game-stats:empty { display: none; }
+#stats-content h2,
+.post-game-stats h2 {
+  font-size: 1.05rem;
+  letter-spacing: 0.15em;
+  text-align: center;
+  margin-bottom: 0.9rem;
+}
+#stats-content h3,
+.post-game-stats h3 {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--dim);
+  margin: 1rem 0 0.5rem;
+}
+
+.stats-tiles { display: flex; gap: 0.4rem; }
+.stat-tile {
+  flex: 1;
+  background: var(--key-bg);
+  border-radius: 5px;
+  padding: 0.5rem 0.2rem;
+  text-align: center;
+}
+.stat-val { font-size: 1.5rem; font-weight: 700; line-height: 1.1; }
+.stat-label {
+  margin-top: 2px;
+  font-size: 0.66rem;
+  color: var(--dim);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.stats-dist { display: flex; flex-direction: column; gap: 4px; }
+.dist-row { display: flex; align-items: center; gap: 0.5rem; }
+.dist-num { width: 0.8rem; text-align: right; color: var(--dim); font-size: 0.85rem; }
+.dist-bar {
+  min-width: 1.4rem;
+  padding: 1px 6px;
+  background: var(--absent);
+  border-radius: 3px;
+  color: var(--text);
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-align: right;
+  box-sizing: border-box;
+}
+.dist-bar.current { background: var(--correct); }
+
+.history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-height: 12rem;
+  overflow-y: auto;
+}
+.history-row {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  width: 100%;
+  padding: 0.4rem 0.6rem;
+  background: var(--key-bg);
+  border: none;
+  border-radius: 5px;
+  color: var(--text);
+  font-size: 0.9rem;
+  text-align: left;
+  cursor: pointer;
+}
+.history-row:hover { filter: brightness(1.15); }
+.history-swatch {
+  width: 0.8rem;
+  height: 0.8rem;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+.history-swatch.solved { background: var(--correct); }
+.history-swatch.lost { background: var(--absent); }
+.history-label { flex: 1; font-weight: 600; }
+.history-outcome { color: var(--dim); font-variant-numeric: tabular-nums; }
+.history-tag {
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--dim);
+  border: 1px solid var(--tile-border);
+  border-radius: 3px;
+  padding: 0 4px;
+}
+
+.stats-empty { color: var(--dim); font-size: 0.85rem; }
+.stats-note {
+  margin-top: 1rem;
+  color: var(--dim);
+  font-size: 0.72rem;
+  text-align: center;
+}
+.stats-clear {
+  display: block;
+  width: 100%;
+  margin-top: 0.5rem;
+  padding: 0.45rem;
+  background: none;
+  border: 1px solid var(--tile-border);
+  border-radius: 5px;
+  color: var(--dim);
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+.stats-clear:hover { color: var(--text); border-color: var(--tile-filled-border); }
+.stats-clear.armed { color: var(--present); border-color: var(--present); font-weight: 600; }
+
 @media (max-width: 430px) {
   /* tighter gaps + padding buy the fluid tiles/keys some extra width */
   :root { --tile-gap: 4px; --key-gap: 4px; }
