@@ -75,6 +75,13 @@ function displayName(padded) {
   return padded.trim();
 }
 
+// A minority of in-game objects have a well-known common name (curated in
+// data/common_names.tsv). Returns the name or null. Used by the end-of-game
+// reveal. NAME_BY_ID is defined further down; this is only called at game end.
+function commonName(padded) {
+  return NAME_BY_ID.get(displayName(padded)) || null;
+}
+
 /* ============ state ============ */
 
 const STORAGE_KEY = "muldle-v1";
@@ -264,6 +271,15 @@ const CONSTELLATION_NAMES = {
   Vul: "Vulpecula",
 };
 
+// catalogue id -> common name (from names.js, if the object has one) so the
+// reveal caption/message can name e.g. NGC 6543 the "Cat's Eye Nebula". Built
+// from ID_NAMES (every id, not ABC_NAMES's deduped representatives) so answers
+// that share a name — NGC0651, NGC0884, … — are named too.
+const NAME_BY_ID = new Map();
+for (const e of (typeof ID_NAMES !== "undefined" ? ID_NAMES : [])) {
+  if (!NAME_BY_ID.has(e.id)) NAME_BY_ID.set(e.id, e.name);
+}
+
 /* ============ DOM setup ============ */
 
 const boardEl = document.getElementById("board");
@@ -385,8 +401,17 @@ function upgradeKey(key, status) {
 
 let messageTimer = null;
 
-function showMessage(text, sticky = false) {
+function showMessage(text, sticky = false, alsoKnownAs = null) {
   messageEl.textContent = text;
+  if (alsoKnownAs) {
+    // reveal a curated common name in italics: "… It was NGC5194. Also known
+    // as: <em>Whirlpool Galaxy</em>." (colon avoids the article guessing game —
+    // "the 47 Tucanae" / "the Barnard's Galaxy" would read wrong)
+    messageEl.append(" Also known as: ");
+    const em = document.createElement("em");
+    em.textContent = alsoKnownAs;
+    messageEl.append(em, ".");
+  }
   messageEl.classList.toggle("reveal", sticky);
   clearTimeout(messageTimer);
   if (!sticky && text) {
@@ -489,6 +514,15 @@ function setHint(ref, text, cls) {
   if (cls) ref.cell.classList.add(cls);
 }
 
+// a spinning placeholder while the SIMBAD query for this cell is in flight
+function setHintSpinner(ref) {
+  ref.cell.classList.remove("match", "near");
+  const sp = document.createElement("span");
+  sp.className = "spinner";
+  ref.val.replaceChildren(sp);
+  ref.val.title = "Loading from SIMBAD…";
+}
+
 function renderHintRow(r, guess) {
   const gi = catalogueIndex(guess), ai = catalogueIndex(answer);
   const cells = hintCells[r];
@@ -503,8 +537,8 @@ function renderHintRow(r, guess) {
   setHint(cells.dist, `${arrow} ${formatSeparation(sep)}`,
     closeness(sep, DIST_MATCH, DIST_NEAR));
 
-  setHint(cells.type, "…", "");
-  setHint(cells.mag, "…", "");
+  setHintSpinner(cells.type);
+  setHintSpinner(cells.mag);
   const gen = puzzleGen;
   const gId = guess.trim();
   const aId = answer.trim();
@@ -578,8 +612,14 @@ function renderCaption(id, ident, otype, found) {
   link.rel = "noopener";
   link.textContent = ident;
   captionEl.replaceChildren(role, " ", link);
+  // common name (if the object has one) and constellation, alongside the type
+  const common = NAME_BY_ID.get(id);
+  if (common) captionEl.append(" · " + common);
   if (otype) captionEl.append(" · " + otype);
   else if (found === false) captionEl.append(" · not in SIMBAD");
+  const idx = CAT_IDENTIFIERS.indexOf(id);
+  const con = idx >= 0 ? CAT_CONSTELLATIONS[idx] : "";
+  if (con) captionEl.append(" · " + (CONSTELLATION_NAMES[con] || con));
   if (finished && !isTarget) {
     const back = document.createElement("a");
     back.href = "#";
@@ -623,6 +663,10 @@ function showObject(id) {
   renderCaption(id, ident, "");
 
   if (!pos) return;
+  // spinner in the caption while the object's SIMBAD data is on its way
+  const spinner = document.createElement("span");
+  spinner.className = "spinner";
+  captionEl.append(" ", spinner);
   const gen = puzzleGen;
   Promise.all([loadAladin(), fetchObjectInfo(ident)])
     .then(([, info]) => {
@@ -651,6 +695,7 @@ function showObject(id) {
     })
     .catch(() => {
       if (gen !== puzzleGen || shownId !== id) return;
+      spinner.remove();
       aladinDiv.textContent = "sky view unavailable";
       aladinDiv.style.display = "flex";
       aladinDiv.style.alignItems = "center";
@@ -733,12 +778,14 @@ function submitGuess() {
 
   if (guess === answer) {
     finished = true;
-    showMessage(`${WIN_MESSAGES[guesses.length - 1]} It was ${displayName(answer)}.`, true);
+    showMessage(`${WIN_MESSAGES[guesses.length - 1]} It was ${displayName(answer)}.`, true, commonName(answer));
     showObject(answer.trim());
+    showPostGame();
   } else if (guesses.length >= MAX_GUESSES) {
     finished = true;
-    showMessage(`Out of guesses — it was ${displayName(answer)}.`, true);
+    showMessage(`Out of guesses — it was ${displayName(answer)}.`, true, commonName(answer));
     showObject(answer.trim());
+    showPostGame();
   }
   resetCurrentRow();       // prefill the next row's greens (no-op if finished)
   renderCurrentRow();
@@ -822,6 +869,7 @@ function startPuzzle(newRandomId, msg) {
   resetCurrentRow(); // no guesses yet, so no prefill — just clears the row
   clearBoardUI();
   hideObjectPanel();
+  hidePostGame();
   updateInfo();
   showMessage(msg);
   saveState();
@@ -844,6 +892,79 @@ document.getElementById("reset-random").addEventListener("click", () =>
 backToDailyBtn.addEventListener("click", () =>
   startPuzzle(null, "Back to today's puzzle."));
 
+/* ============ post-game: emoji-grid share + next-puzzle countdown ============ */
+
+const postGameEl = document.getElementById("post-game");
+const shareBtn = document.getElementById("share-button");
+const countdownEl = document.getElementById("countdown");
+const SHARE_EMOJI = { correct: "🟩", present: "🟨", absent: "⬛" };
+
+// a Wordle-style emoji grid of the scored rows (all 8 tiles, blanks included)
+function buildShareText() {
+  const solved = guesses.length && guesses[guesses.length - 1] === answer;
+  const tries = solved ? guesses.length : "X";
+  const head = randomId ? "Muldle (practice)" : `Muldle #${DAY}`;
+  const grid = guesses
+    .map(g => scoreGuess(g, answer).map(s => SHARE_EMOJI[s]).join(""))
+    .join("\n");
+  return `${head} ${tries}/${MAX_GUESSES}\n${grid}`;
+}
+
+shareBtn.addEventListener("click", () => {
+  const text = buildShareText();
+  window.__lastShare = text; // fallback + e2e hook
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(
+      () => showMessage("Copied to clipboard!"),
+      () => showMessage("Copy failed — try again"));
+  } else {
+    showMessage("Copied to clipboard!");
+  }
+  shareBtn.blur();
+});
+
+let countdownTimer = null;
+
+// milliseconds from now until the next local midnight (when the daily rolls)
+function msToMidnight() {
+  const now = new Date();
+  const next = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+  return next - now;
+}
+
+function fmtDuration(ms) {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  const p = n => String(n).padStart(2, "0");
+  return `${p(Math.floor(s / 3600))}:${p(Math.floor((s % 3600) / 60))}:${p(s % 60)}`;
+}
+
+function startCountdown() {
+  clearInterval(countdownTimer);
+  const tick = () => {
+    const ms = msToMidnight();
+    if (ms <= 0) {
+      countdownEl.textContent = "A new puzzle is ready — reload.";
+      clearInterval(countdownTimer);
+    } else {
+      countdownEl.textContent = "Next puzzle in " + fmtDuration(ms);
+    }
+  };
+  tick();
+  countdownTimer = setInterval(tick, 1000);
+}
+
+function showPostGame() {
+  postGameEl.hidden = false;
+  countdownEl.hidden = !!randomId; // no daily countdown for a practice object
+  if (randomId) clearInterval(countdownTimer);
+  else startCountdown();
+}
+
+function hidePostGame() {
+  postGameEl.hidden = true;
+  clearInterval(countdownTimer);
+}
+
 /* ============ init ============ */
 
 buildBoard();
@@ -860,12 +981,14 @@ updateInfo();
 guesses.forEach((g, r) => { renderGuessRow(r, g); renderHintRow(r, g); });
 if (guesses.length && guesses[guesses.length - 1] === answer) {
   finished = true;
-  showMessage(`Already solved — it was ${displayName(answer)}.`, true);
+  showMessage(`Already solved — it was ${displayName(answer)}.`, true, commonName(answer));
   showObject(answer.trim());
+  showPostGame();
 } else if (guesses.length >= MAX_GUESSES) {
   finished = true;
-  showMessage(`Out of guesses — it was ${displayName(answer)}.`, true);
+  showMessage(`Out of guesses — it was ${displayName(answer)}.`, true, commonName(answer));
   showObject(answer.trim());
+  showPostGame();
 }
 resetCurrentRow();  // prefill greens from restored guesses (hard mode)
 renderCurrentRow();

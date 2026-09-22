@@ -263,10 +263,11 @@ main {
   .board-area { display: contents; }
   .board { order: 0; margin: 0.8rem 0 0; }
   .message { order: 1; }
-  .keyboard { order: 2; }
-  .hint-panel { order: 3; margin-bottom: 0.8rem; }
-  .object-panel { order: 4; margin-bottom: 0.8rem; }
-  .help { order: 5; }
+  .post-game { order: 2; }
+  .keyboard { order: 3; }
+  .hint-panel { order: 4; margin-bottom: 0.8rem; }
+  .object-panel { order: 5; margin-bottom: 0.8rem; }
+  .help { order: 6; }
 }
 
 .row { display: flex; gap: var(--tile-gap); touch-action: manipulation; }
@@ -320,6 +321,52 @@ main {
   margin-bottom: 0.4rem;
 }
 .message.reveal { font-size: 1.1rem; font-weight: 600; }
+
+/* post-game block: emoji-grid share + countdown to the next daily puzzle */
+.post-game {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 0.6rem;
+}
+.share-button {
+  padding: 0.45rem 1.3rem;
+  font-size: 0.95rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: #000;
+  background: var(--correct);
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: filter 0.15s;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+.share-button:hover { filter: brightness(1.1); }
+.share-button:active { transform: scale(0.97); }
+.countdown {
+  color: var(--dim);
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* small inline spinner shown while a SIMBAD query is in flight */
+.spinner {
+  display: inline-block;
+  width: 0.9em;
+  height: 0.9em;
+  border: 2px solid var(--tile-border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  vertical-align: -0.12em;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .spinner { animation: none; }
+}
 
 .keyboard {
   display: flex;
@@ -553,6 +600,14 @@ footer a { color: var(--accent); }
    (0.85s / 2), i.e. when the card is edge-on and both faces are ~invisible */
 #flipper.flip-anim .face { transition-delay: 0.425s; }
 #face-abc { transform: rotateY(180deg); }
+/* A sky view (Aladin) is a WebGL <canvas>. In Firefox a canvas inside a
+   preserve-3d, rotated subtree is composited on its own layer and ignores the
+   away face's visibility:hidden (and 3D transform), so its reticle/crosshair
+   keeps painting, mirrored to the left. Group-composite the away panel to
+   transparent so the escaped canvas is culled too. Only at rest (:not(.flip-anim));
+   mid-flip the visibility timing above handles it and flattening would break the
+   spin. Panel stays live, so flipping back restores the view + crosshair. */
+#flipper:not(.flip-anim) .face.face-back .object-panel { opacity: 0; }
 
 @media (prefers-reduced-motion: reduce) {
   #flipper { transition: none; }

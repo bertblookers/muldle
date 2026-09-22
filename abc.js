@@ -126,10 +126,12 @@ const POOL = ABC_ORDER.length;
 const TODAY = ABC_ORDER[((DAY % POOL) + POOL) % POOL];
 
 // every known name -> its representative id (so a guessed real name can be
-// shown in the sky view), and id -> proper-case name (for reveal captions)
+// shown in the sky view), and id -> proper-case name (for reveal captions).
+// NAME_BY_KEY stays on ABC_NAMES (unique name -> representative id); NAME_BY_ID
+// uses ID_NAMES (every id) so ids that share a name resolve too.
 const NAME_BY_KEY = new Map(ABC_NAMES.map(e => [nameKey(e.name), e.id]));
 const NAME_BY_ID = new Map();
-for (const e of ABC_NAMES) if (!NAME_BY_ID.has(e.id)) NAME_BY_ID.set(e.id, e.name);
+for (const e of ID_NAMES) if (!NAME_BY_ID.has(e.id)) NAME_BY_ID.set(e.id, e.name);
 
 function isHardMode() {
   try {
@@ -394,6 +396,11 @@ function renderCaption(id, otype) {
   link.textContent = NAME_BY_ID.get(id) || ident;
   captionEl.replaceChildren(role, " ", link, " · ", ident);
   if (otype) captionEl.append(" · " + otype);
+  // constellation, for parity with ID mode's richer caption (CONSTELLATION_NAMES
+  // is a game.js top-level const, shared across the two classic scripts)
+  const conIdx = CAT_IDENTIFIERS.indexOf(id);
+  const con = conIdx >= 0 ? CAT_CONSTELLATIONS[conIdx] : "";
+  if (con) captionEl.append(" · " + (CONSTELLATION_NAMES[con] || con));
   if (finished && !isTarget) {
     const back = document.createElement("a");
     back.href = "#";
@@ -439,6 +446,10 @@ function showObject(id) {
   const pos = idx >= 0 ? CAT_POSITIONS[idx] : null;
   renderCaption(id, "");
   if (!pos) return;
+  // spinner in the caption while the object's SIMBAD data is on its way
+  const spinner = document.createElement("span");
+  spinner.className = "spinner";
+  captionEl.append(" ", spinner);
 
   Promise.all([loadAladin(), fetchInfo(ident)]).then(([, info]) => {
     if (shownId !== id) return; // another row clicked meanwhile
@@ -459,6 +470,7 @@ function showObject(id) {
     renderCaption(id, info.otype);
   }).catch(() => {
     if (shownId !== id) return;
+    spinner.remove();
     aladinDiv.textContent = "sky view unavailable";
     aladinDiv.style.display = "flex";
     aladinDiv.style.alignItems = "center";
@@ -527,10 +539,12 @@ function submitGuess() {
     finished = true;
     showMessage(`${WIN_MESSAGES[guesses.length - 1]} It was the ${activeName}.`, true);
     showObject(activeId);
+    showPostGame();
   } else if (guesses.length >= MAX_GUESSES) {
     finished = true;
     showMessage(`Out of guesses — it was the ${activeName}.`, true);
     showObject(activeId);
+    showPostGame();
   }
   resetCurrent();
   renderCurrent();
@@ -571,6 +585,7 @@ function startAbcPuzzle(name, id, isRandom, msg) {
   buildBoard();
   buildKeyboard();
   hideObjectPanel();
+  hidePostGame();
   resetCurrent();
   renderCurrent();
   updateInfo();
@@ -609,6 +624,83 @@ settingsDialog.addEventListener("click", (e) => {
   }
 }, true);
 
+/* ============ post-game: emoji-grid share + next-puzzle countdown ============ */
+
+const postGameEl = document.getElementById("abc-post-game");
+const shareBtn = document.getElementById("abc-share-button");
+const countdownEl = document.getElementById("abc-countdown");
+const SHARE_EMOJI = { correct: "🟩", present: "🟨", absent: "⬛" };
+
+// emoji grid of the scored rows: one square per playable slot, words spaced
+// (fixed punctuation slots are skipped)
+function buildShareText() {
+  const solved = guesses.length && guesses[guesses.length - 1] === ANSWER;
+  const tries = solved ? guesses.length : "X";
+  const head = randomName ? "Muldle ABC (practice)" : `Muldle ABC #${DAY}`;
+  const grid = guesses.map(g => {
+    const score = scoreGuess(g, ANSWER);
+    return MODEL.words
+      .map(wi => wi.filter(i => MODEL.slots[i].playable).map(i => SHARE_EMOJI[score[i]]).join(""))
+      .filter(Boolean)
+      .join(" ");
+  }).join("\n");
+  return `${head} ${tries}/${MAX_GUESSES}\n${grid}`;
+}
+
+shareBtn.addEventListener("click", () => {
+  const text = buildShareText();
+  window.__lastShareAbc = text; // fallback + e2e hook
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(
+      () => showMessage("Copied to clipboard!"),
+      () => showMessage("Copy failed — try again"));
+  } else {
+    showMessage("Copied to clipboard!");
+  }
+  shareBtn.blur();
+});
+
+let countdownTimer = null;
+
+function msToMidnight() {
+  const now = new Date();
+  const next = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+  return next - now;
+}
+
+function fmtDuration(ms) {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  const p = n => String(n).padStart(2, "0");
+  return `${p(Math.floor(s / 3600))}:${p(Math.floor((s % 3600) / 60))}:${p(s % 60)}`;
+}
+
+function startCountdown() {
+  clearInterval(countdownTimer);
+  const tick = () => {
+    const ms = msToMidnight();
+    if (ms <= 0) {
+      countdownEl.textContent = "A new puzzle is ready — reload.";
+      clearInterval(countdownTimer);
+    } else {
+      countdownEl.textContent = "Next puzzle in " + fmtDuration(ms);
+    }
+  };
+  tick();
+  countdownTimer = setInterval(tick, 1000);
+}
+
+function showPostGame() {
+  postGameEl.hidden = false;
+  countdownEl.hidden = !!randomName; // no daily countdown for a practice object
+  if (randomName) clearInterval(countdownTimer);
+  else startCountdown();
+}
+
+function hidePostGame() {
+  postGameEl.hidden = true;
+  clearInterval(countdownTimer);
+}
+
 /* ============ init ============ */
 
 loadState();
@@ -624,10 +716,12 @@ if (guesses.length && guesses[guesses.length - 1] === ANSWER) {
   finished = true;
   showMessage(`Already solved — it was the ${activeName}.`, true);
   showObject(activeId);
+  showPostGame();
 } else if (guesses.length >= MAX_GUESSES) {
   finished = true;
   showMessage(`Out of guesses — it was the ${activeName}.`, true);
   showObject(activeId);
+  showPostGame();
 }
 resetCurrent();
 renderCurrent();
