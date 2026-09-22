@@ -530,6 +530,14 @@ footer a { color: var(--accent); }
   .hint-value { font-size: 0.78rem; }
   .title-row { gap: 0.5rem; }
   .mode-seg { padding: 0.15rem 0.55rem; }
+  /* shave the header so the navigator row still clears the fold on ~667px-tall
+     phones (iPhone SE): smaller title, tighter padding + margins, compact nav */
+  header { padding: 0.5rem 1rem 0.3rem; }
+  h1 { font-size: 1.55rem; letter-spacing: 0.2em; margin-right: -0.2em; }
+  .tagline { margin-top: 0.12rem; font-size: 0.82rem; }
+  .puzzle-nav { margin-top: 0.22rem; }
+  .nav-btn { padding: 0.08rem 0.6rem; font-size: 0.75rem; }
+  .puzzle-info { margin-top: 0.16rem; }
 }
 
 /* very small / old phones (e.g. 320x568): shave header + key height so the
@@ -644,6 +652,37 @@ footer a { color: var(--accent); }
 .mode-seg[aria-pressed="true"] { background: var(--accent); color: var(--bg); }
 @media (hover: hover) {
   .mode-seg:not([aria-pressed="true"]):hover { color: var(--text); }
+}
+
+/* puzzle navigator: a joined group « · Puzzle #N · », clamped to <= today
+   (next disabled on the newest). No fill — the site background shows through,
+   with just the frame + divider lines. Hidden by .hidden in random mode. */
+.puzzle-nav {
+  display: inline-flex;
+  margin-top: 0.4rem;
+  border: 1px solid var(--tile-filled-border);
+  border-radius: 0.4rem;
+  overflow: hidden;
+}
+.puzzle-nav.hidden { display: none; }
+.nav-btn {
+  background: transparent;   /* site background, no button colour */
+  color: var(--dim);
+  border: none;
+  padding: 0.2rem 0.85rem;
+  font-size: 0.8rem;
+  font-weight: 700;
+  line-height: 1.4;
+  cursor: pointer;
+  transition: color 0.2s;
+  -webkit-tap-highlight-color: transparent;
+}
+.nav-btn + .nav-btn { border-left: 1px solid var(--tile-filled-border); } /* divider line */
+.nav-step { font-size: 0.95rem; }
+.nav-num { letter-spacing: 0.04em; color: var(--text); } /* the number reads as active, never greyed */
+.nav-btn:disabled { color: var(--tile-border); cursor: default; }
+@media (hover: hover) {
+  .nav-btn:not(:disabled):hover { color: var(--text); } /* brighten only, no fill */
 }
 
 /* ============ ABC board (the whole name on one line, word-spaced) ============ */

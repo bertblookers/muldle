@@ -64,7 +64,10 @@ function todayIndex() {
 const ORDER = shuffledOrder(CAT_IDENTIFIERS, SHUFFLE_SEED);
 const DAY = todayIndex();
 const N = ORDER.length;
-const ANSWER = fullWord(ORDER[((DAY % N) + N) % N]);
+// the padded daily answer for any puzzle number (the navigator plays past ones);
+// today's is answerForDay(DAY). Wraps mod N, so it's defined for every integer.
+function answerForDay(d) { return fullWord(ORDER[((d % N) + N) % N]); }
+const ANSWER = answerForDay(DAY);
 const ALLOWED = new Set(CAT_IDENTIFIERS.map(fullWord));
 // real catalogue entries kept out of the game (no SIMBAD data — mostly IC
 // numbers that turned out to be stars or lost); rejected with an honest
@@ -85,6 +88,10 @@ function commonName(padded) {
 /* ============ state ============ */
 
 const STORAGE_KEY = "muldle-v1";
+// past puzzles replayed via the navigator, keyed by number: { [day]: guesses[] }.
+// Separate from muldle-v1 so browsing an off-day puzzle never clobbers today's
+// daily progress (or the random-practice object).
+const ARCHIVE_KEY = "muldle-archive-v1";
 
 let guesses = [];          // array of padded guess strings already submitted
 let current = [];          // characters of the guess being typed, indexed by
@@ -93,6 +100,7 @@ let lockedTiles = [];      // hard mode: positions prefilled with known greens
 let finished = false;      // won or lost
 let randomId = null;       // identifier overriding the daily answer (random-object mode)
 let answer = ANSWER;       // answer of the puzzle being played (padded)
+let viewDay = DAY;         // puzzle number in play: today's (DAY) or an archived one (< DAY)
 
 // start a fresh guess row; in hard mode every known-green tile (one a previous
 // guess already matched, blanks included) starts filled in and locked —
@@ -109,8 +117,17 @@ function resetCurrentRow() {
   }
 }
 
+// today's daily (and the random-practice object) live in muldle-v1, keyed on
+// DAY; an off-day puzzle browsed via the navigator goes to the archive store so
+// it never overwrites today's daily.
 function saveState() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify({ day: DAY, guesses, randomId }));
+  if (randomId || viewDay === DAY) {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ day: DAY, guesses, randomId }));
+  } else {
+    const a = loadArchive();
+    a[viewDay] = guesses;
+    localStorage.setItem(ARCHIVE_KEY, JSON.stringify(a));
+  }
 }
 
 function loadState() {
@@ -125,6 +142,27 @@ function loadState() {
     }
   } catch (e) { /* corrupt state: start fresh */ }
   return { guesses: [], randomId: null };
+}
+
+function loadArchive() {
+  try {
+    const a = JSON.parse(localStorage.getItem(ARCHIVE_KEY));
+    return a && typeof a === "object" ? a : {};
+  } catch (e) { return {}; }
+}
+
+// saved guesses for the puzzle currently in view: today's daily from muldle-v1
+// (unless a random save sits there, in which case today's daily is fresh), or
+// an off-day puzzle's guesses from the archive store
+function loadGuessesForView() {
+  if (viewDay === DAY) {
+    const s = loadState();
+    return s.randomId ? [] : s.guesses;
+  }
+  const gs = loadArchive()[viewDay];
+  return Array.isArray(gs)
+    ? gs.filter(g => typeof g === "string" && g.length === WORD_LEN)
+    : [];
 }
 
 /* ============ scoring (standard Wordle rules) ============ */
@@ -286,6 +324,53 @@ const boardEl = document.getElementById("board");
 const messageEl = document.getElementById("message");
 const keyboardEl = document.getElementById("keyboard");
 const infoEl = document.getElementById("puzzle-info");
+
+const navEl = document.getElementById("puzzle-nav");
+const navPrevBtn = document.getElementById("nav-prev");
+const navTodayBtn = document.getElementById("nav-today");
+const navNextBtn = document.getElementById("nav-next");
+const navNumEl = document.getElementById("nav-num-val");
+
+/* ---- navigator plumbing: URL param + cross-mode bridge (kept below the DOM
+   marker so tools/test_logic.mjs's pre-DOM sandbox never touches window) ---- */
+
+// the active mode is owned by abc.js's flip; game.js runs before it sets
+// window.__muldleMode, so on load we read the persisted preference directly
+function activeModeOnLoad() {
+  try {
+    const m = localStorage.getItem("muldle-mode-v1");
+    if (m === "abc" || m === "id") return m;
+  } catch (e) { /* ignore */ }
+  return "id";
+}
+
+// a shareable, reload-safe ?p=<day> for the active mode's puzzle. Clamped to
+// <= today so future dailies stay out of reach (spoiler-free). null = absent.
+function readUrlDay() {
+  try {
+    const p = new URL(location.href).searchParams.get("p");
+    if (p == null) return null;
+    const n = parseInt(p, 10);
+    if (!Number.isFinite(n)) return null;
+    return Math.max(0, Math.min(DAY, n));
+  } catch (e) { return null; }
+}
+
+// one URL shared by both modes; it always reflects the ACTIVE mode's view day.
+// replaceState (not push) keeps the address bar current without history spam.
+const muldle = (window.__muldle = window.__muldle || {});
+muldle.today = DAY;
+muldle.view = muldle.view || { id: DAY, abc: DAY };
+muldle.syncUrl = function () {
+  try {
+    const m = window.__muldleMode || activeModeOnLoad();
+    const day = muldle.view[m];
+    const url = new URL(location.href);
+    if (day == null || day === DAY) url.searchParams.delete("p");
+    else url.searchParams.set("p", String(day));
+    history.replaceState(history.state, "", url);
+  } catch (e) { /* history API unavailable (e.g. file://) */ }
+};
 
 const tiles = []; // tiles[row][col] for the WORD_LEN playable tiles per row
 
@@ -830,9 +915,21 @@ hardModeToggle.addEventListener("change", () => {
 });
 
 function updateInfo() {
+  // the puzzle number now lives in the navigator, so the info line just carries
+  // the context (random / archive) and the pool size
   infoEl.textContent = randomId
     ? `Random object · ${N} identifiers in play`
-    : `Puzzle #${DAY} · ${N} identifiers in play`;
+    : viewDay !== DAY
+      ? `Archive · ${N} identifiers in play`
+      : `${N} identifiers in play`;
+}
+
+function updateNav() {
+  navEl.classList.toggle("hidden", !!randomId); // a random object has no number
+  navNumEl.textContent = viewDay;
+  navPrevBtn.disabled = viewDay <= 0;
+  navNextBtn.disabled = viewDay >= DAY;   // clamp to <= today (spoiler-free)
+  // the middle number button is never greyed — on today it's just a no-op jump
 }
 
 function clearBoardUI() {
@@ -861,9 +958,15 @@ function randomIdentifier() {
   return id;
 }
 
+// wipe the current puzzle's guesses and replay it fresh. Keeps the puzzle in
+// play (random object, today's daily, or an archived one via viewDay).
 function startPuzzle(newRandomId, msg) {
   randomId = newRandomId;
-  answer = randomId ? fullWord(randomId) : ANSWER;
+  // a random object has no puzzle number: snap back to today's slot so the URL
+  // drops any archived ?p (otherwise a reload would re-enter the archive and
+  // discard the random object that was just saved to muldle-v1)
+  if (randomId) viewDay = DAY;
+  answer = randomId ? fullWord(randomId) : answerForDay(viewDay);
   guesses = [];
   finished = false;
   resetCurrentRow(); // no guesses yet, so no prefill — just clears the row
@@ -871,7 +974,53 @@ function startPuzzle(newRandomId, msg) {
   hideObjectPanel();
   hidePostGame();
   updateInfo();
+  updateNav();
   showMessage(msg);
+  saveState();
+  muldle.view.id = viewDay;
+  muldle.syncUrl();
+  settingsDialog.close();
+}
+
+// render a loaded puzzle whose guesses + answer are already set: replay the
+// scored rows, restore the finished/reveal state, prefill the current row.
+// Shared by init and goToPuzzle (the caller sets the board up beforehand).
+function renderPuzzleState() {
+  guesses.forEach((g, r) => { renderGuessRow(r, g); renderHintRow(r, g); });
+  finished = false;
+  if (guesses.length && guesses[guesses.length - 1] === answer) {
+    finished = true;
+    showMessage(`Already solved — it was ${displayName(answer)}.`, true, commonName(answer));
+    showObject(answer.trim());
+    showPostGame();
+  } else if (guesses.length >= MAX_GUESSES) {
+    finished = true;
+    showMessage(`Out of guesses — it was ${displayName(answer)}.`, true, commonName(answer));
+    showObject(answer.trim());
+    showPostGame();
+  }
+  resetCurrentRow();
+  renderCurrentRow();
+}
+
+// switch to puzzle <day> (today's daily or an archived one), loading its saved
+// progress. Leaves random-practice mode. day is clamped to [0, today].
+function goToPuzzle(day) {
+  day = Math.max(0, Math.min(DAY, day | 0));
+  randomId = null;
+  viewDay = day;
+  answer = answerForDay(day);
+  guesses = loadGuessesForView();
+  clearBoardUI();
+  hideObjectPanel();
+  hidePostGame();
+  showMessage("");
+  renderPuzzleState();
+  if (!finished) showMessage(day === DAY ? "" : `Puzzle #${day}`);
+  updateInfo();
+  updateNav();
+  muldle.view.id = viewDay;
+  muldle.syncUrl();
   saveState();
   settingsDialog.close();
 }
@@ -889,8 +1038,13 @@ document.getElementById("reset-puzzle").addEventListener("click", () =>
   startPuzzle(randomId, "Puzzle reset — same object, fresh guesses."));
 document.getElementById("reset-random").addEventListener("click", () =>
   startPuzzle(randomIdentifier(), "Random object loaded — this is not today's puzzle."));
-backToDailyBtn.addEventListener("click", () =>
-  startPuzzle(null, "Back to today's puzzle."));
+backToDailyBtn.addEventListener("click", () => goToPuzzle(DAY));
+
+// puzzle navigator: step through past puzzles (clamped to <= today), or the
+// middle button jumps straight back to today's
+navPrevBtn.addEventListener("click", () => { if (viewDay > 0) goToPuzzle(viewDay - 1); navPrevBtn.blur(); });
+navNextBtn.addEventListener("click", () => { if (viewDay < DAY) goToPuzzle(viewDay + 1); navNextBtn.blur(); });
+navTodayBtn.addEventListener("click", () => { if (viewDay !== DAY) goToPuzzle(DAY); navTodayBtn.blur(); });
 
 /* ============ post-game: emoji-grid share + next-puzzle countdown ============ */
 
@@ -903,7 +1057,7 @@ const SHARE_EMOJI = { correct: "🟩", present: "🟨", absent: "⬛" };
 function buildShareText() {
   const solved = guesses.length && guesses[guesses.length - 1] === answer;
   const tries = solved ? guesses.length : "X";
-  const head = randomId ? "Muldle (practice)" : `Muldle #${DAY}`;
+  const head = randomId ? "Muldle (practice)" : `Muldle #${viewDay}`;
   const grid = guesses
     .map(g => scoreGuess(g, answer).map(s => SHARE_EMOJI[s]).join(""))
     .join("\n");
@@ -955,9 +1109,11 @@ function startCountdown() {
 
 function showPostGame() {
   postGameEl.hidden = false;
-  countdownEl.hidden = !!randomId; // no daily countdown for a practice object
-  if (randomId) clearInterval(countdownTimer);
-  else startCountdown();
+  // countdown only for today's daily — a practice or archived puzzle doesn't roll over
+  const isDaily = !randomId && viewDay === DAY;
+  countdownEl.hidden = !isDaily;
+  if (isDaily) startCountdown();
+  else clearInterval(countdownTimer);
 }
 
 function hidePostGame() {
@@ -973,22 +1129,20 @@ buildKeyboard();
 loadSettings();
 hardModeToggle.checked = hardMode;
 
-const loaded = loadState();
-guesses = loaded.guesses;
-randomId = loaded.randomId;
-answer = randomId ? fullWord(randomId) : ANSWER;
-updateInfo();
-guesses.forEach((g, r) => { renderGuessRow(r, g); renderHintRow(r, g); });
-if (guesses.length && guesses[guesses.length - 1] === answer) {
-  finished = true;
-  showMessage(`Already solved — it was ${displayName(answer)}.`, true, commonName(answer));
-  showObject(answer.trim());
-  showPostGame();
-} else if (guesses.length >= MAX_GUESSES) {
-  finished = true;
-  showMessage(`Out of guesses — it was ${displayName(answer)}.`, true, commonName(answer));
-  showObject(answer.trim());
-  showPostGame();
+// initial puzzle: a ?p=<day> for the active mode opens that archived puzzle;
+// otherwise restore today's daily (or the random-practice object) from muldle-v1
+const urlDay = readUrlDay();
+if (urlDay != null && urlDay !== DAY && activeModeOnLoad() === "id") {
+  viewDay = urlDay;
+  answer = answerForDay(viewDay);
+  guesses = loadGuessesForView();
+} else {
+  const loaded = loadState();
+  guesses = loaded.guesses;
+  randomId = loaded.randomId;
+  answer = randomId ? fullWord(randomId) : ANSWER;
 }
-resetCurrentRow();  // prefill greens from restored guesses (hard mode)
-renderCurrentRow();
+muldle.view.id = viewDay;
+updateInfo();
+updateNav();
+renderPuzzleState(); // replays rows, restores finished state, prefills the current row

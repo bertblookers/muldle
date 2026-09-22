@@ -98,6 +98,9 @@ const ABC_SEED = 20260916;
 const ABC_EPOCH = { y: 2026, m: 9, d: 8 }; // day 0 of the ABC order
 const SETTINGS_KEY = "muldle-settings-v1"; // shared with game.js (read-only here)
 const ABC_STORAGE_KEY = "muldle-abc-v1";
+// off-day puzzles browsed via the navigator, keyed by number: { [day]: guesses[] }.
+// Separate from muldle-abc-v1 so browsing never clobbers today's daily.
+const ABC_ARCHIVE_KEY = "muldle-abc-archive-v1";
 
 // name -> slots (one per non-space char), words (slot-index groups for layout),
 // and the spaceless uppercased answer string
@@ -124,6 +127,30 @@ const ABC_ORDER = shuffledOrder(ABC_NAMES, ABC_SEED);
 const DAY = dayIndex(ABC_EPOCH);
 const POOL = ABC_ORDER.length;
 const TODAY = ABC_ORDER[((DAY % POOL) + POOL) % POOL];
+
+// the {name, id} entry for any ABC puzzle number (the navigator plays past ones)
+function entryForDay(d) { return ABC_ORDER[((d % POOL) + POOL) % POOL]; }
+
+// which face is active on load (game.js's flip owns it later). Read the
+// persisted key directly — MODE_KEY isn't defined until the flip section.
+function activeModeOnLoad() {
+  try {
+    const m = localStorage.getItem("muldle-mode-v1");
+    if (m === "abc" || m === "id") return m;
+  } catch (e) { /* ignore */ }
+  return "id";
+}
+
+// ?p=<day> from the URL, clamped to <= today (spoiler-free). null = absent.
+function readUrlDay() {
+  try {
+    const p = new URL(location.href).searchParams.get("p");
+    if (p == null) return null;
+    const n = parseInt(p, 10);
+    if (!Number.isFinite(n)) return null;
+    return Math.max(0, Math.min(DAY, n));
+  } catch (e) { return null; }
+}
 
 // every known name -> its representative id (so a guessed real name can be
 // shown in the sky view), and id -> proper-case name (for reveal captions).
@@ -153,6 +180,7 @@ let guesses = [];   // submitted spaceless uppercase strings (length ANSWER.leng
 let current = [];   // per-slot typed chars (fixed slots pre-filled)
 let locked = [];    // per-slot: fixed punctuation or a hard-mode known green
 let finished = false;
+let abcViewDay = DAY; // puzzle number in play: today's (DAY) or an archived one (< DAY)
 
 function setActive(name, id, isRandom) {
   activeName = name;
@@ -178,9 +206,43 @@ function resetCurrent() {
   }
 }
 
+// today's daily (and the random object) live in muldle-abc-v1, keyed on DAY;
+// an off-day puzzle browsed via the navigator goes to the archive store
 function saveState() {
-  localStorage.setItem(ABC_STORAGE_KEY,
-    JSON.stringify({ day: DAY, name: activeName, guesses, randomName }));
+  if (randomName || abcViewDay === DAY) {
+    localStorage.setItem(ABC_STORAGE_KEY,
+      JSON.stringify({ day: DAY, name: activeName, guesses, randomName }));
+  } else {
+    const a = loadAbcArchive();
+    a[abcViewDay] = guesses;
+    localStorage.setItem(ABC_ARCHIVE_KEY, JSON.stringify(a));
+  }
+}
+
+function loadAbcArchive() {
+  try {
+    const a = JSON.parse(localStorage.getItem(ABC_ARCHIVE_KEY));
+    return a && typeof a === "object" ? a : {};
+  } catch (e) { return {}; }
+}
+
+// today's daily guesses from muldle-abc-v1 (empty if a random save sits there
+// or the stored name no longer matches today's), filtered to this board's width
+function loadTodayAbcGuesses() {
+  try {
+    const s = JSON.parse(localStorage.getItem(ABC_STORAGE_KEY));
+    if (s && s.day === DAY && !s.randomName && s.name === TODAY.name && Array.isArray(s.guesses)) {
+      return s.guesses.filter(g => typeof g === "string" && g.length === ANSWER.length);
+    }
+  } catch (e) { /* corrupt: fresh */ }
+  return [];
+}
+
+function loadArchivedAbcGuesses(day) {
+  const gs = loadAbcArchive()[day];
+  return Array.isArray(gs)
+    ? gs.filter(g => typeof g === "string" && g.length === ANSWER.length)
+    : [];
 }
 
 function loadState() {
@@ -203,6 +265,12 @@ const boardEl = document.getElementById("abc-board");
 const messageEl = document.getElementById("abc-message");
 const keyboardEl = document.getElementById("abc-keyboard");
 const infoEl = document.getElementById("abc-puzzle-info");
+
+const navEl = document.getElementById("abc-puzzle-nav");
+const navPrevBtn = document.getElementById("abc-nav-prev");
+const navTodayBtn = document.getElementById("abc-nav-today");
+const navNextBtn = document.getElementById("abc-nav-next");
+const navNumEl = document.getElementById("abc-nav-num-val");
 
 let tiles = []; // tiles[row][slotIndex]
 
@@ -319,9 +387,20 @@ function shakeRow() {
 }
 
 function updateInfo() {
+  // the puzzle number now lives in the navigator; the info line carries context
   infoEl.textContent = randomName
     ? `Random name · ${POOL} named objects`
-    : `Puzzle #${DAY} · ${POOL} named objects`;
+    : abcViewDay !== DAY
+      ? `Archive · ${POOL} named objects`
+      : `${POOL} named objects`;
+}
+
+function updateNav() {
+  navEl.classList.toggle("hidden", !!randomName); // a random object has no number
+  navNumEl.textContent = abcViewDay;
+  navPrevBtn.disabled = abcViewDay <= 0;
+  navNextBtn.disabled = abcViewDay >= DAY;   // clamp to <= today (spoiler-free)
+  // the middle number button is never greyed — on today it's just a no-op jump
 }
 
 /* ============ sky view (Aladin Lite) — a clicked known name or the target === */
@@ -580,6 +659,9 @@ hardModeToggle.addEventListener("change", () => {
 
 function startAbcPuzzle(name, id, isRandom, msg) {
   setActive(name, id, isRandom);
+  // a random object has no puzzle number: snap to today's slot so the URL drops
+  // any archived ?p (else a reload re-enters the archive, discarding the random)
+  if (isRandom) abcViewDay = DAY;
   guesses = [];
   finished = false;
   buildBoard();
@@ -589,7 +671,57 @@ function startAbcPuzzle(name, id, isRandom, msg) {
   resetCurrent();
   renderCurrent();
   updateInfo();
+  updateNav();
   showMessage(msg);
+  saveState();
+  if (window.__muldle) {
+    window.__muldle.view.abc = abcViewDay;
+    if (window.__muldle.syncUrl) window.__muldle.syncUrl();
+  }
+  settingsDialog.close();
+}
+
+// render a loaded ABC puzzle whose guesses + active name are already set:
+// replay scored rows, restore finished/reveal, prefill. Shared by init + nav.
+function renderAbcState() {
+  guesses.forEach((g, r) => renderGuessRow(r, g));
+  finished = false;
+  if (guesses.length && guesses[guesses.length - 1] === ANSWER) {
+    finished = true;
+    showMessage(`Already solved — it was the ${activeName}.`, true);
+    showObject(activeId);
+    showPostGame();
+  } else if (guesses.length >= MAX_GUESSES) {
+    finished = true;
+    showMessage(`Out of guesses — it was the ${activeName}.`, true);
+    showObject(activeId);
+    showPostGame();
+  }
+  resetCurrent();
+  renderCurrent();
+}
+
+// switch to ABC puzzle <day> (today's daily or an archived one), loading its
+// saved progress. Leaves random practice. day is clamped to [0, today].
+function goToAbcPuzzle(day) {
+  day = Math.max(0, Math.min(DAY, day | 0));
+  abcViewDay = day;
+  const entry = entryForDay(day);
+  setActive(entry.name, entry.id, false);
+  guesses = (day === DAY) ? loadTodayAbcGuesses() : loadArchivedAbcGuesses(day);
+  buildBoard();
+  buildKeyboard();
+  hideObjectPanel();
+  hidePostGame();
+  showMessage("");
+  renderAbcState();
+  if (!finished) showMessage(day === DAY ? "" : `Puzzle #${day}`);
+  updateInfo();
+  updateNav();
+  if (window.__muldle) {
+    window.__muldle.view.abc = abcViewDay;
+    if (window.__muldle.syncUrl) window.__muldle.syncUrl();
+  }
   saveState();
   settingsDialog.close();
 }
@@ -620,9 +752,15 @@ settingsDialog.addEventListener("click", (e) => {
     startAbcPuzzle(en.name, en.id, true, "Random named object — this is not today's puzzle.");
   } else if (id === "back-to-daily") {
     e.stopPropagation();
-    startAbcPuzzle(TODAY.name, TODAY.id, false, "Back to today's puzzle.");
+    goToAbcPuzzle(DAY);
   }
 }, true);
+
+// puzzle navigator (ABC): step through past puzzles (clamped to <= today), or
+// the middle button jumps straight back to today's
+navPrevBtn.addEventListener("click", () => { if (abcViewDay > 0) goToAbcPuzzle(abcViewDay - 1); navPrevBtn.blur(); });
+navNextBtn.addEventListener("click", () => { if (abcViewDay < DAY) goToAbcPuzzle(abcViewDay + 1); navNextBtn.blur(); });
+navTodayBtn.addEventListener("click", () => { if (abcViewDay !== DAY) goToAbcPuzzle(DAY); navTodayBtn.blur(); });
 
 /* ============ post-game: emoji-grid share + next-puzzle countdown ============ */
 
@@ -636,7 +774,7 @@ const SHARE_EMOJI = { correct: "🟩", present: "🟨", absent: "⬛" };
 function buildShareText() {
   const solved = guesses.length && guesses[guesses.length - 1] === ANSWER;
   const tries = solved ? guesses.length : "X";
-  const head = randomName ? "Muldle ABC (practice)" : `Muldle ABC #${DAY}`;
+  const head = randomName ? "Muldle ABC (practice)" : `Muldle ABC #${abcViewDay}`;
   const grid = guesses.map(g => {
     const score = scoreGuess(g, ANSWER);
     return MODEL.words
@@ -691,9 +829,11 @@ function startCountdown() {
 
 function showPostGame() {
   postGameEl.hidden = false;
-  countdownEl.hidden = !!randomName; // no daily countdown for a practice object
-  if (randomName) clearInterval(countdownTimer);
-  else startCountdown();
+  // countdown only for today's daily — a practice or archived puzzle doesn't roll over
+  const isDaily = !randomName && abcViewDay === DAY;
+  countdownEl.hidden = !isDaily;
+  if (isDaily) startCountdown();
+  else clearInterval(countdownTimer);
 }
 
 function hidePostGame() {
@@ -703,28 +843,28 @@ function hidePostGame() {
 
 /* ============ init ============ */
 
-loadState();
+// initial puzzle: a ?p=<day> for the active mode opens that archived puzzle;
+// otherwise restore today's daily (or the random object) from muldle-abc-v1
+const urlDay = readUrlDay();
+if (urlDay != null && urlDay !== DAY && activeModeOnLoad() === "abc") {
+  abcViewDay = urlDay;
+  const entry = entryForDay(urlDay);
+  setActive(entry.name, entry.id, false);
+  guesses = loadArchivedAbcGuesses(urlDay);
+} else {
+  loadState();
+}
+if (window.__muldle) window.__muldle.view.abc = abcViewDay;
+
 window.__abc = { get NAME() { return activeName; }, get ANSWER() { return ANSWER; },
-  DAY, POOL, get model() { return MODEL; } }; // e2e/debug hook
+  DAY, POOL, get viewDay() { return abcViewDay; }, get model() { return MODEL; } }; // e2e/debug hook
 
 buildBoard();
 buildKeyboard();
 updateInfo();
+updateNav();
 
-guesses.forEach((g, r) => renderGuessRow(r, g));
-if (guesses.length && guesses[guesses.length - 1] === ANSWER) {
-  finished = true;
-  showMessage(`Already solved — it was the ${activeName}.`, true);
-  showObject(activeId);
-  showPostGame();
-} else if (guesses.length >= MAX_GUESSES) {
-  finished = true;
-  showMessage(`Out of guesses — it was the ${activeName}.`, true);
-  showObject(activeId);
-  showPostGame();
-}
-resetCurrent();
-renderCurrent();
+renderAbcState();
 
 /* ============ ID <-> ABC flip ============ */
 
@@ -763,6 +903,8 @@ function applyMode(m, animate) {
   setInert(faceAbc, m !== "abc");
   document.querySelectorAll(".mode-seg").forEach(b =>
     b.setAttribute("aria-pressed", String(b.dataset.mode === m)));
+  // keep the shareable ?p= in sync with whichever mode is now active
+  if (window.__muldle && window.__muldle.syncUrl) window.__muldle.syncUrl();
 }
 
 // once the spin settles, drop the midpoint delay (steady-state visibility is
