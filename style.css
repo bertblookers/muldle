@@ -291,6 +291,14 @@ main {
 /* hard mode: known-green tiles prefilled in the row being typed */
 .tile.locked { border-color: var(--correct); color: var(--correct); }
 
+/* the row being typed: free tiles can be clicked to move the cursor, which
+   marks where the next character goes (it overwrites a filled tile) */
+.tile.editable { cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.tile.cursor { border-color: var(--accent); box-shadow: inset 0 -3px 0 var(--accent); }
+
+/* info line: rejected guesses this puzzle (✖ n) */
+.rejected-count { color: var(--text); font-variant-numeric: tabular-nums; }
+
 .tile.correct { background: var(--correct); border-color: var(--correct); }
 .tile.present { background: var(--present); border-color: var(--present); }
 .tile.absent  { background: var(--absent);  border-color: var(--absent); }

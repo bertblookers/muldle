@@ -182,6 +182,7 @@ let randomName = null; // when practising a random named object
 let guesses = [];   // submitted spaceless uppercase strings (length ANSWER.length)
 let current = [];   // per-slot typed chars (fixed slots pre-filled)
 let locked = [];    // per-slot: fixed punctuation or a hard-mode known green
+let cursor = 0;     // slot the next typed char goes into; slots.length = past the end
 let finished = false;
 let abcViewDay = DAY; // puzzle number in play: today's (DAY) or an archived one (< DAY)
 
@@ -207,6 +208,21 @@ function resetCurrent() {
       }
     }
   }
+  cursor = nextFreeSlot(0);
+}
+
+// the first slot at or after i that can be typed into (not punctuation, not a
+// locked green); slots.length if none
+function nextFreeSlot(i) {
+  while (i < MODEL.slots.length && locked[i]) i++;
+  return i;
+}
+
+// the last typable slot before i (-1 if none)
+function prevFreeSlot(i) {
+  i--;
+  while (i >= 0 && locked[i]) i--;
+  return i;
 }
 
 // today's daily (and the random object) live in muldle-abc-v1, keyed on DAY;
@@ -396,6 +412,7 @@ function buildBoard() {
       for (const si of wi) {
         const t = document.createElement("div");
         t.className = "tile" + (MODEL.slots[si].playable ? "" : " fixed");
+        t.addEventListener("click", () => tileClicked(r, si));
         rowTiles[si] = t;
         word.appendChild(t);
       }
@@ -440,11 +457,14 @@ function renderCurrent() {
   if (r >= MAX_GUESSES) return;
   for (let i = 0; i < MODEL.slots.length; i++) {
     const t = tiles[r][i];
-    t.classList.remove("filled", "locked");
+    t.classList.remove("filled", "locked", "cursor", "editable");
     if (!MODEL.slots[i].playable) { t.textContent = MODEL.slots[i].ch; continue; }
     const ch = current[i];
     if (ch === undefined) { t.textContent = ""; }
     else { t.textContent = ch; t.classList.add(locked[i] ? "locked" : "filled"); }
+    // free slots can be clicked to move the cursor there (see handleKey)
+    if (!finished && !locked[i]) t.classList.add("editable");
+    if (!finished && i === cursor) t.classList.add("cursor");
   }
 }
 
@@ -459,7 +479,7 @@ function renderGuessRow(r, guess) {
     const t = tiles[r][i];
     if (!MODEL.slots[i].playable) { t.textContent = MODEL.slots[i].ch; continue; }
     t.textContent = guess[i];
-    t.classList.remove("filled", "locked");
+    t.classList.remove("filled", "locked", "cursor", "editable");
     t.classList.add(score[i]);
     upgradeKey(guess[i], score[i]);
   }
@@ -681,15 +701,26 @@ function rowClicked(r) {
 
 const WIN_MESSAGES = ["Stellar!", "Nailed it!", "Brilliant!", "Well named!", "Good eye!", "Phew!"];
 
+// Same cursor model as ID mode (game.js handleKey): typing writes at the
+// cursor, overwriting a filled slot, then moves to the next free slot; a click
+// on a free slot moves the cursor there. Locked slots are never under it.
 function handleKey(k) {
   if (finished) return;
+  const len = MODEL.slots.length;
   if (k === "Enter") { submitGuess(); return; }
+  if (k === "Left") { const p = prevFreeSlot(cursor); if (p >= 0) cursor = p; renderCurrent(); return; }
+  if (k === "Right") { if (cursor < len) cursor = nextFreeSlot(cursor + 1); renderCurrent(); return; }
   if (k === "Back") {
-    for (let i = MODEL.slots.length - 1; i >= 0; i--) {
-      if (MODEL.slots[i].playable && current[i] !== undefined && !locked[i]) {
-        delete current[i]; renderCurrent(); return;
+    // clear the slot under the cursor if filled, else the nearest typed slot
+    // before it (moving there) — "delete the last char" when typing in order
+    if (cursor < len && current[cursor] !== undefined) {
+      delete current[cursor];
+    } else {
+      for (let i = Math.min(cursor, len) - 1; i >= 0; i--) {
+        if (current[i] !== undefined && !locked[i]) { delete current[i]; cursor = i; break; }
       }
     }
+    renderCurrent();
     return;
   }
   if (!/^[0-9A-Z]$/.test(k)) return;
@@ -699,11 +730,23 @@ function handleKey(k) {
     showMessage(`Hard mode: there is no ${k} in the name`);
     return;
   }
-  for (let i = 0; i < MODEL.slots.length; i++) {
-    if (MODEL.slots[i].playable && current[i] === undefined) {
-      current[i] = k; renderCurrent(); return;
-    }
+  // cursor past the end: fall back to the first empty playable slot, if any
+  let at = cursor;
+  if (at >= len) {
+    at = 0;
+    while (at < len && current[at] !== undefined) at++;
+    if (at >= len) return; // row full
   }
+  current[at] = k;
+  cursor = nextFreeSlot(at + 1);
+  renderCurrent();
+}
+
+// clicking a free slot of the row being typed puts the cursor there
+function tileClicked(r, i) {
+  if (finished || r !== guesses.length || locked[i]) return;
+  cursor = i;
+  renderCurrent();
 }
 
 function submitGuess() {
@@ -741,12 +784,21 @@ function submitGuess() {
   renderCurrent();
 }
 
+// a focused text input (e.g. in the sky viewer) keeps its own arrow keys
+function isTextField(el) {
+  return !!el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
+}
+
 document.addEventListener("keydown", (e) => {
   if (window.__muldleMode !== "abc") return;
   if (settingsDialog.open || statsDialog.open) return;
   if (e.ctrlKey || e.metaKey || e.altKey) return;
   if (e.key === "Enter") handleKey("Enter");
   else if (e.key === "Backspace") handleKey("Back");
+  else if ((e.key === "ArrowLeft" || e.key === "ArrowRight") && !finished && !isTextField(e.target)) {
+    e.preventDefault(); // only while a row is being typed: a long finished name
+    handleKey(e.key === "ArrowLeft" ? "Left" : "Right"); // still arrow-scrolls
+  }
   else if (/^[0-9]$/.test(e.key)) handleKey(e.key);
   else if (/^[a-zA-Z]$/.test(e.key)) handleKey(e.key.toUpperCase());
 });

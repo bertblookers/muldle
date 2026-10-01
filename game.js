@@ -88,7 +88,8 @@ function commonName(padded) {
 /* ============ state ============ */
 
 const STORAGE_KEY = "muldle-v1";
-// past puzzles replayed via the navigator, keyed by number: { [day]: guesses[] }.
+// past puzzles replayed via the navigator, keyed by number:
+// { [day]: { guesses, rejected } } (older entries are a bare guesses[] array).
 // Separate from muldle-v1 so browsing an off-day puzzle never clobbers today's
 // daily progress (or the random-practice object).
 const ARCHIVE_KEY = "muldle-archive-v1";
@@ -97,6 +98,12 @@ let guesses = [];          // array of padded guess strings already submitted
 let current = [];          // characters of the guess being typed, indexed by
                            // tile position (sparse: holes are empty tiles)
 let lockedTiles = [];      // hard mode: positions prefilled with known greens
+let cursor = 0;            // tile the next typed character goes into; WORD_LEN =
+                           // past the end (row full, or moved off with →)
+let rejected = 0;          // guesses refused this puzzle (unknown identifier,
+                           // SIMBAD-less entry, or a hard-mode violation)
+let lastRejected = null;   // the row's last refused guess: re-submitting it
+                           // unchanged (held / double-tapped Enter) isn't a new try
 let finished = false;      // won or lost
 let randomId = null;       // identifier overriding the daily answer (random-object mode)
 let answer = ANSWER;       // answer of the puzzle being played (padded)
@@ -115,6 +122,26 @@ function resetCurrentRow() {
       }
     }
   }
+  cursor = nextFreeTile(0);
+  lastRejected = null;
+}
+
+// the first tile at or after i that isn't a locked green (WORD_LEN if none)
+function nextFreeTile(i) {
+  while (i < WORD_LEN && lockedTiles[i]) i++;
+  return i;
+}
+
+// the last tile before i that isn't a locked green (-1 if none)
+function prevFreeTile(i) {
+  i--;
+  while (i >= 0 && lockedTiles[i]) i--;
+  return i;
+}
+
+// a stored rejected-guess count, sanitised (absent / corrupt -> 0)
+function rejectedCount(v) {
+  return Number.isInteger(v) && v > 0 ? v : 0;
 }
 
 // today's daily (and the random-practice object) live in muldle-v1, keyed on
@@ -122,10 +149,10 @@ function resetCurrentRow() {
 // it never overwrites today's daily.
 function saveState() {
   if (randomId || viewDay === DAY) {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ day: DAY, guesses, randomId }));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ day: DAY, guesses, randomId, rejected }));
   } else {
     const a = loadArchive();
-    a[viewDay] = guesses;
+    a[viewDay] = { guesses, rejected };
     localStorage.setItem(ARCHIVE_KEY, JSON.stringify(a));
   }
 }
@@ -138,10 +165,11 @@ function loadState() {
         guesses: s.guesses.filter(g => typeof g === "string" && g.length === WORD_LEN),
         randomId: typeof s.randomId === "string" &&
           ALLOWED.has(fullWord(s.randomId)) ? s.randomId : null,
+        rejected: rejectedCount(s.rejected),
       };
     }
   } catch (e) { /* corrupt state: start fresh */ }
-  return { guesses: [], randomId: null };
+  return { guesses: [], randomId: null, rejected: 0 };
 }
 
 function loadArchive() {
@@ -151,26 +179,32 @@ function loadArchive() {
   } catch (e) { return {}; }
 }
 
-// saved guesses for the puzzle currently in view: today's daily from muldle-v1
-// (unless a random save sits there, in which case today's daily is fresh), an
-// off-day puzzle's guesses from the archive store, or — for a past daily you
-// played live but never replayed in the archive — the persistent results store
-function loadGuessesForView() {
+// saved { guesses, rejected } for the puzzle currently in view: today's daily
+// from muldle-v1 (unless a random save sits there, in which case today's daily
+// is fresh), an off-day puzzle from the archive store, or — for a past daily
+// you played live but never replayed in the archive — the persistent results store
+function loadViewState() {
   if (viewDay === DAY) {
     const s = loadState();
-    return s.randomId ? [] : s.guesses;
+    return s.randomId ? { guesses: [], rejected: 0 } : { guesses: s.guesses, rejected: s.rejected };
   }
   const valid = g => typeof g === "string" && g.length === WORD_LEN;
-  const gs = loadArchive()[viewDay];
-  if (Array.isArray(gs)) return gs.filter(valid);
+  const e = loadArchive()[viewDay];
+  // archive entries were bare guess arrays before the rejected count existed
+  if (Array.isArray(e)) return { guesses: e.filter(valid), rejected: 0 };
+  if (e && Array.isArray(e.guesses)) {
+    return { guesses: e.guesses.filter(valid), rejected: rejectedCount(e.rejected) };
+  }
   const rec = loadResults()[viewDay];
-  return rec && Array.isArray(rec.guesses) ? rec.guesses.filter(valid) : [];
+  return rec && Array.isArray(rec.guesses)
+    ? { guesses: rec.guesses.filter(valid), rejected: rejectedCount(rec.rejected) }
+    : { guesses: [], rejected: 0 };
 }
 
 /* ============ local play history + stats (no backend) ============ */
 
 // Persistent per-mode results, keyed by puzzle number:
-//   { [day]: { guesses, solved, tries, playedOnDay } }.
+//   { [day]: { guesses, solved, tries, playedOnDay, rejected } }.
 // This is the ONLY store that outlives a day rollover — muldle-v1 is keyed on
 // today's DAY and discarded once the day turns, so a finished daily is recorded
 // here at finish time (and migrated from a stale muldle-v1 on load). Everything
@@ -207,6 +241,7 @@ function recordCurrentResult(solved) {
     solved,
     tries: solved ? guesses.length : null,
     playedOnDay: viewDay === DAY,
+    rejected,
   });
 }
 
@@ -239,7 +274,10 @@ function migrateStaleDaily() {
     const ans = answerForDay(s.day);
     const solved = gs[gs.length - 1] === ans;
     if (!solved && gs.length < MAX_GUESSES) return; // unfinished — not a result
-    recordResult(s.day, { guesses: gs, solved, tries: solved ? gs.length : null, playedOnDay: true });
+    recordResult(s.day, {
+      guesses: gs, solved, tries: solved ? gs.length : null, playedOnDay: true,
+      rejected: rejectedCount(s.rejected),
+    });
   } catch (e) { /* corrupt: nothing to migrate */ }
 }
 
@@ -318,9 +356,26 @@ const KEY_RANK = { absent: 0, present: 1, correct: 2 };
 // may not be used again. Returns a message describing the first violation,
 // or null if the guess is acceptable.
 function hardModeViolation(prevGuesses, answer, guess) {
-  const rank = {}; // char -> best score it ever received (keyboard colouring)
-  for (const prev of prevGuesses) {
+  return hintViolation(revealedHints(prevGuesses, answer), guess);
+}
+
+// the hints revealed by the previous guesses, scored once: each guess with its
+// score, plus every char's best score (the keyboard colouring) for the grey ban
+function revealedHints(prevGuesses, answer) {
+  const rank = {}; // char -> best score it ever received
+  const scored = prevGuesses.map(prev => {
     const score = scoreGuess(prev, answer);
+    for (let i = 0; i < WORD_LEN; i++) {
+      const r = KEY_RANK[score[i]];
+      if (!(prev[i] in rank) || r > rank[prev[i]]) rank[prev[i]] = r;
+    }
+    return { prev, score };
+  });
+  return { scored, rank };
+}
+
+function hintViolation({ scored, rank }, guess) {
+  for (const { prev, score } of scored) {
     for (let i = 0; i < WORD_LEN; i++) {
       if (score[i] === "correct" && guess[i] !== prev[i]) {
         return prev[i] === BLANK
@@ -343,10 +398,6 @@ function hardModeViolation(prevGuesses, answer, guess) {
           : `Hard mode: tile ${i + 1} is not ${prev[i]}`;
       }
     }
-    for (let i = 0; i < WORD_LEN; i++) {
-      const r = KEY_RANK[score[i]];
-      if (!(prev[i] in rank) || r > rank[prev[i]]) rank[prev[i]] = r;
-    }
   }
   for (const ch of guess) {
     if (rank[ch] === 0) {
@@ -356,6 +407,17 @@ function hardModeViolation(prevGuesses, answer, guess) {
     }
   }
   return null;
+}
+
+// How many identifiers hard mode would accept as the next guess: every allowed
+// one that keeps to all the hints revealed so far. Shown in the info line, as
+// lettered answers can leave only a handful (2 of 12001 is not unusual). The
+// hints are scored once, not once per candidate.
+function legalGuessCount(prevGuesses, answer) {
+  const hints = revealedHints(prevGuesses, answer);
+  let n = 0;
+  for (const w of ALLOWED) if (!hintViolation(hints, w)) n++;
+  return n;
 }
 
 /* ============ object-property hints (pure helpers) ============ */
@@ -509,6 +571,7 @@ function buildBoard() {
     for (let c = 0; c < WORD_LEN; c++) {
       const t = document.createElement("div");
       t.className = "tile";
+      t.addEventListener("click", () => tileClicked(r, c));
       row.appendChild(t);
       rowTiles.push(t);
     }
@@ -576,13 +639,16 @@ function renderCurrentRow() {
   for (let c = 0; c < WORD_LEN; c++) {
     const t = tiles[r][c];
     const ch = current[c];
-    t.classList.remove("filled", "locked");
+    t.classList.remove("filled", "locked", "cursor", "editable");
     if (ch === undefined) {
       t.textContent = "";
     } else {
       t.textContent = ch === BLANK ? "" : ch;
       t.classList.add(lockedTiles[c] ? "locked" : "filled");
     }
+    // free tiles of the row being typed can be clicked to move the cursor there
+    if (!finished && !lockedTiles[c]) t.classList.add("editable");
+    if (!finished && c === cursor) t.classList.add("cursor");
   }
 }
 
@@ -594,7 +660,8 @@ function renderGuessRow(r, guess) {
   for (let c = 0; c < WORD_LEN; c++) {
     const t = tiles[r][c];
     t.textContent = guess[c] === BLANK ? "" : guess[c];
-    t.classList.remove("filled", "locked"); // locked text color would hide the char
+    // locked text color would hide the char; a scored row is no longer editable
+    t.classList.remove("filled", "locked", "cursor", "editable");
     t.classList.add(score[c]);
     if (guess[c] !== BLANK) upgradeKey(guess[c], score[c]);
   }
@@ -934,22 +1001,30 @@ function rowClicked(r) {
 
 const WIN_MESSAGES = ["Stellar!", "Supernova!", "Brilliant!", "Well spotted!", "Good eye!", "Phew, just in orbit!"];
 
+// The row being typed has a cursor (highlighted tile). Typing writes at the
+// cursor — overwriting a filled tile — then moves it to the next free tile, so
+// after a rejected guess you click the tile to change and just type over it.
+// Locked greens are never under the cursor.
 function handleKey(k) {
   if (finished) return;
   if (k === "Enter") { submitGuess(); return; }
+  if (k === "Left") { const p = prevFreeTile(cursor); if (p >= 0) cursor = p; renderCurrentRow(); return; }
+  if (k === "Right") { if (cursor < WORD_LEN) cursor = nextFreeTile(cursor + 1); renderCurrentRow(); return; }
   if (k === "Back") {
-    // clear the last typed tile, skipping locked greens
-    for (let i = WORD_LEN - 1; i >= 0; i--) {
-      if (current[i] !== undefined && !lockedTiles[i]) {
-        delete current[i];
-        renderCurrentRow();
-        break;
+    // clear the tile under the cursor if it holds a character; otherwise the
+    // nearest typed tile before the cursor (moving there). With the cursor at
+    // the end of what was typed this is the classic "delete the last char".
+    if (cursor < WORD_LEN && current[cursor] !== undefined) {
+      delete current[cursor];
+    } else {
+      for (let i = Math.min(cursor, WORD_LEN) - 1; i >= 0; i--) {
+        if (current[i] !== undefined && !lockedTiles[i]) { delete current[i]; cursor = i; break; }
       }
     }
+    renderCurrentRow();
     return;
   }
-  // any character goes anywhere; validity is checked on Enter. The first
-  // empty tile is the cursor — locked greens are filled, so typing skips them
+  // any character goes anywhere; validity is checked on Enter
   if (!/^[0-9A-Z]$/.test(k)) return;
   // hard mode bans greyed-out characters (absent everywhere already tried);
   // reject them at type time too, not only on Enter. The keyboard key carries
@@ -958,9 +1033,23 @@ function handleKey(k) {
     showMessage(`Hard mode: there is no ${k} in the identifier`);
     return;
   }
-  for (let i = 0; i < WORD_LEN; i++) {
-    if (current[i] === undefined) { current[i] = k; renderCurrentRow(); break; }
+  // cursor past the end: fall back to the first empty tile (if any is left)
+  let at = cursor;
+  if (at >= WORD_LEN) {
+    at = 0;
+    while (at < WORD_LEN && current[at] !== undefined) at++;
+    if (at >= WORD_LEN) return; // row full
   }
+  current[at] = k;
+  cursor = nextFreeTile(at + 1);
+  renderCurrentRow();
+}
+
+// clicking a free tile of the row being typed puts the cursor there
+function tileClicked(r, c) {
+  if (finished || r !== guesses.length || lockedTiles[c]) return;
+  cursor = c;
+  renderCurrentRow();
 }
 
 function submitGuess() {
@@ -978,14 +1067,14 @@ function submitGuess() {
     showMessage(EXCLUDED.has(guess)
       ? `${displayName(guess)} is a real catalogue entry, but SIMBAD has no data on it — not in the game`
       : `${displayName(guess)} is not a known object identifier`);
-    shakeCurrentRow();
+    rejectGuess(guess);
     return;
   }
   if (hardMode) {
     const violation = hardModeViolation(guesses, answer, guess);
     if (violation) {
       showMessage(violation);
-      shakeCurrentRow();
+      rejectGuess(guess);
       return;
     }
   }
@@ -1007,8 +1096,26 @@ function submitGuess() {
     showObject(answer.trim());
     showPostGame();
   }
+  updateInfo();            // fewer identifiers stay legal with every new hint
   resetCurrentRow();       // prefill the next row's greens (no-op if finished)
   renderCurrentRow();
+}
+
+// a refused guess: shake the row and count it (shown in the info line and the
+// share text). The row keeps its characters so one tile can be fixed and
+// retried; re-submitting the same refused guess unchanged doesn't count again.
+function rejectGuess(guess) {
+  shakeCurrentRow();
+  if (guess === lastRejected) return;
+  lastRejected = guess;
+  rejected++;
+  saveState();
+  updateInfo();
+}
+
+// a focused text input (e.g. in the sky viewer) keeps its own arrow keys
+function isTextField(el) {
+  return !!el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
 }
 
 document.addEventListener("keydown", (e) => {
@@ -1017,6 +1124,10 @@ document.addEventListener("keydown", (e) => {
   if (e.ctrlKey || e.metaKey || e.altKey) return;
   if (e.key === "Enter") { handleKey("Enter"); }
   else if (e.key === "Backspace") { handleKey("Back"); }
+  else if ((e.key === "ArrowLeft" || e.key === "ArrowRight") && !finished && !isTextField(e.target)) {
+    e.preventDefault(); // only while a row is being typed: scrolling / carets keep working
+    handleKey(e.key === "ArrowLeft" ? "Left" : "Right");
+  }
   else if (e.key === " ") { e.preventDefault(); } // blanks are implicit now
   else if (/^[0-9]$/.test(e.key)) { handleKey(e.key); }
   else if (/^[a-zA-Z]$/.test(e.key)) { handleKey(e.key.toUpperCase()); }
@@ -1047,16 +1158,36 @@ hardModeToggle.addEventListener("change", () => {
   // off: free all tiles); partial input is discarded to avoid collisions
   resetCurrentRow();
   renderCurrentRow();
+  updateInfo(); // the legal-guess count only applies in hard mode
 });
 
+// legalGuessCount scans all identifiers, so remember the last result; it only
+// changes when the puzzle or its guesses do
+let legalMemo = { key: null, n: 0 };
+function legalCountNow() {
+  const key = answer + "|" + guesses.join("|");
+  if (legalMemo.key !== key) legalMemo = { key, n: legalGuessCount(guesses, answer) };
+  return legalMemo.n;
+}
+
 function updateInfo() {
-  // the puzzle number now lives in the navigator, so the info line just carries
-  // the context (random / archive) and the pool size
-  infoEl.textContent = randomId
-    ? `Random object · ${N} identifiers in play`
-    : viewDay !== DAY
-      ? `Archive · ${N} identifiers in play`
-      : `${N} identifiers in play`;
+  // the puzzle number lives in the navigator, so the info line carries the
+  // context (random / archive), the pool size — or, mid-game in hard mode, how
+  // many identifiers are still legal — and the rejected-guess count
+  const ctx = randomId ? "Random object · " : viewDay !== DAY ? "Archive · " : "";
+  let pool = `${N} identifiers in play`;
+  if (hardMode && !finished && guesses.length) {
+    const n = legalCountNow();
+    pool = `${n} legal identifier${n === 1 ? "" : "s"} left`;
+  }
+  infoEl.replaceChildren(ctx + pool);
+  if (rejected) {
+    const rej = document.createElement("span");
+    rej.className = "rejected-count";
+    rej.title = "Rejected guesses this puzzle (unknown identifier or a hard-mode break)";
+    rej.textContent = `✖ ${rejected}`;
+    infoEl.append(" · ", rej);
+  }
 }
 
 function updateNav() {
@@ -1071,7 +1202,7 @@ function clearBoardUI() {
   for (const row of tiles) {
     for (const t of row) {
       t.textContent = "";
-      t.classList.remove("filled", "locked", "correct", "present", "absent");
+      t.classList.remove("filled", "locked", "cursor", "editable", "correct", "present", "absent");
     }
   }
   for (const rowEl of boardEl.children) {
@@ -1103,9 +1234,11 @@ function startPuzzle(newRandomId, msg) {
   if (randomId) viewDay = DAY;
   answer = randomId ? fullWord(randomId) : answerForDay(viewDay);
   guesses = [];
+  rejected = 0;
   finished = false;
   resetCurrentRow(); // no guesses yet, so no prefill — just clears the row
   clearBoardUI();
+  renderCurrentRow(); // show the cursor on the fresh row
   hideObjectPanel();
   hidePostGame();
   updateInfo();
@@ -1147,7 +1280,7 @@ function goToPuzzle(day) {
   randomId = null;
   viewDay = day;
   answer = answerForDay(day);
-  guesses = loadGuessesForView();
+  ({ guesses, rejected } = loadViewState());
   clearBoardUI();
   hideObjectPanel();
   hidePostGame();
@@ -1313,7 +1446,8 @@ function buildShareText() {
   const grid = guesses
     .map(g => scoreGuess(g, answer).map(s => SHARE_EMOJI[s]).join(""))
     .join("\n");
-  return `${head} ${tries}/${MAX_GUESSES}\n${grid}`;
+  const rej = rejected ? ` ✖ ${rejected}` : ""; // the hunt for a legal guess
+  return `${head} ${tries}/${MAX_GUESSES}${rej}\n${grid}`;
 }
 
 shareBtn.addEventListener("click", () => {
@@ -1395,14 +1529,15 @@ const urlDay = readUrlDay();
 if (urlDay != null && urlDay !== DAY && activeModeOnLoad() === "id") {
   viewDay = urlDay;
   answer = answerForDay(viewDay);
-  guesses = loadGuessesForView();
+  ({ guesses, rejected } = loadViewState());
 } else {
   const loaded = loadState();
   guesses = loaded.guesses;
   randomId = loaded.randomId;
+  rejected = loaded.rejected;
   answer = randomId ? fullWord(randomId) : ANSWER;
 }
 muldle.view.id = viewDay;
-updateInfo();
 updateNav();
 renderPuzzleState(); // replays rows, restores finished state, prefills the current row
+updateInfo();        // after renderPuzzleState: the info line depends on `finished`
