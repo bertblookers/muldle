@@ -46,11 +46,11 @@ PASP 99, 695 (1987).
 
 ## SIMBAD
 
-Object types, magnitudes and angular sizes are queried at runtime from the
+Object types and magnitudes are queried at runtime from the
 [SIMBAD database](https://simbad.cds.unistra.fr/). At build time SIMBAD also
-supplies cross-identifications (above) and the positions of the objects with
+supplies cross-identifications (above), the positions of the objects with
 no NGC/IC or Barnard entry (M40, M45, most Melotte and Collinder clusters,
-C9).
+C9) and one of the sources of the angular sizes (below).
 
 > This research has made use of the SIMBAD database, operated at CDS,
 > Strasbourg, France (Wenger et al. 2000, A&AS 143, 9).
@@ -89,6 +89,30 @@ In the ShareAlike spirit of those sources, this curated list (as shipped in
 `names.js`, `names_v2.js` and `aka.js`) is in turn offered under
 [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/): anyone is
 welcome to reuse it, with attribution, under the same terms.
+
+## Angular sizes (the sky view's zoom)
+
+How far the sky view zooms out for each object (`sizes.js`) is decided at
+build time from several sources, by kind of object (a nebula is never sized
+by the star cluster inside it, a cluster never by its tidal radius), with a
+few corrections checked by hand against survey images:
+
+- **SIMBAD** angular sizes (credited above).
+- **OpenNGC** sizes and nebula outlines, by Mattia Verga
+  ([OpenNGC](https://github.com/mattiaverga/OpenNGC)), used under
+  [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/).
+- **VizieR catalogues** (credited above): Sharpless 1959 (VII/20), Lynds
+  1965 bright nebulae (VII/9), Lynds 1962 dark nebulae (VII/7A), Rodgers,
+  Campbell & Whiteoak 1960 (VII/216), van den Bergh 1966 (VII/21), Cederblad
+  1946 (VII/231), Barnard 1927 (VII/220A), Lyngå 1987 (VII/92A), Dias et al.
+  2002 (B/ocl), Kharchenko et al. 2013 (J/A+A/558/A53), Dutra & Bica 2002
+  (J/A+A/383/631) and Bica et al. 2008 (J/MNRAS/389/678).
+- **Wikipedia** — the apparent sizes in English Wikipedia's infoboxes (the
+  numbers only), text under
+  [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/).
+
+As with the names, this table is in turn offered under
+[CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/).
 
 ## Aladin Lite
 

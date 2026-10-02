@@ -247,16 +247,36 @@ function commonName(word, p = pool) {
   return p.names.get(word) || null;
 }
 
-// The object's other established names (aka.js, keyed by v2 answer: display
-// only, not frozen by an era), shown in the reveal beside its common name; a
-// v1 id looks them up through its object's v2 answer. Only for an object
-// that has a common name in the puzzle's era, and never repeating it.
-function otherNames(word, p = pool) {
-  const id = p.ids[p.index.get(word)], common = commonName(word, p);
-  if (id === undefined || !common || typeof ALSO_KNOWN_AS === "undefined") return [];
+// The v2 answer an entry of pool p is (aka.js and sizes.js are keyed by it):
+// the entry itself in v2, a v1 id through its object's v2 answer.
+function v2Answer(word, p = pool) {
+  const id = p.ids[p.index.get(word)];
+  if (id === undefined) return null;
+  if (p.era === "v2") return id;
   const u = unpadId(id);
-  const v2 = p.era === "v2" ? id : V2_BY_UPPER.get(u) || V2_ALIASES[u];
+  return V2_BY_UPPER.get(u) || V2_ALIASES[u] || null;
+}
+
+// The object's other established names (aka.js, keyed by v2 answer: display
+// only, not frozen by an era), shown in the reveal beside its common name.
+// Only for an object that has a common name in the puzzle's era, and never
+// repeating it.
+function otherNames(word, p = pool) {
+  const v2 = v2Answer(word, p), common = commonName(word, p);
+  if (!v2 || !common || typeof ALSO_KNOWN_AS === "undefined") return [];
   return (ALSO_KNOWN_AS[v2] || []).filter(n => n !== common);
+}
+
+// The sky view's field of view in degrees (both modes): how much sky the whole
+// object needs around its position (sizes.js's VIEW_SIZES, arcmin, keyed by v2
+// answer; it loads with the sky view) times VIEW_MARGIN, so it fills about 80%
+// of the view. DEFAULT_FOV where no source has a size (or sizes.js didn't load).
+const VIEW_MARGIN = 1.25;
+const MIN_FOV = 0.05, MAX_FOV = 30, DEFAULT_FOV = 0.3; // degrees
+function viewFov(word, p = pool) {
+  const a = v2Answer(word, p);
+  const arcmin = a && typeof VIEW_SIZES !== "undefined" ? VIEW_SIZES[a] : undefined;
+  return arcmin ? Math.min(Math.max((VIEW_MARGIN * arcmin) / 60, MIN_FOV), MAX_FOV) : DEFAULT_FOV;
 }
 
 /* ---- refusals: why a word that isn't in the puzzle's pool was refused ---- */
@@ -492,46 +512,32 @@ function loadViewState() {
     const s = loadState();
     return s.randomId ? fresh : { guesses: s.guesses, rejected: s.rejected, fmt: s.fmt };
   }
-  return readEntry(loadArchive()[viewDay], viewDay) || readEntry(loadResults()[viewDay], viewDay) || fresh;
+  return readEntry(loadArchive()[viewDay], viewDay) || readEntry(idResults.load()[viewDay], viewDay) || fresh;
 }
 
 /* ============ local play history + stats (no backend) ============ */
 
-// Persistent per-mode results, keyed by puzzle number:
+// ID mode's persistent results, keyed by puzzle number (the store, streaks and
+// the Stats & history view live in stats.js):
 //   { [day]: { guesses, solved, tries, playedOnDay, rejected, fmt } }.
-// This is the ONLY store that outlives a day rollover — muldle-v1 is keyed on
-// today's DAY and discarded once the day turns, so a finished daily is recorded
-// here at finish time (and migrated from a stale muldle-v1 on load). Everything
-// stays in this browser; nothing is ever transmitted.
+// muldle-v1 is keyed on today's DAY and discarded once the day turns, so a
+// finished daily is recorded here at finish time (and migrated from a stale
+// muldle-v1 on load). A live daily's record and a foreign one (see
+// foreignEntry) are never overwritten.
 const RESULTS_KEY = "muldle-results-v1";
-
-function loadResults() {
-  try {
-    const r = JSON.parse(localStorage.getItem(RESULTS_KEY));
-    return r && typeof r === "object" ? r : {};
-  } catch (e) { return {}; }
-}
-
-function saveResults(store) {
-  try { localStorage.setItem(RESULTS_KEY, JSON.stringify(store)); } catch (e) { /* quota/full */ }
-}
-
-// Record one finished puzzle. A live-daily record (playedOnDay) is canonical and
-// permanent: it is written once and never overwritten — not by a later archive
-// replay, nor by a reset-and-replay — so daily history and streaks stay stable.
-// A foreign record (see foreignEntry) is never overwritten either.
-function recordResult(day, entry) {
-  const store = loadResults();
-  if (store[day] && (store[day].playedOnDay || foreignEntry(store[day], day))) return;
-  store[day] = entry;
-  saveResults(store);
-}
+const idResults = MuldleStats.create({
+  key: RESULTS_KEY, today: DAY, maxGuesses: MAX_GUESSES,
+  keep: (e, day) => !!e && (e.playedOnDay || foreignEntry(e, day)),
+  heading: "Stats & history — ID",
+  alsoClear: [ARCHIVE_KEY, STORAGE_KEY],
+  openPuzzle: day => { statsDialog.close(); goToPuzzle(day); },
+});
 
 // Snapshot the just-finished puzzle in view into the results store. Random
 // practice has no puzzle number, so it is never recorded (stays ephemeral).
 function recordCurrentResult(solved) {
   if (randomId) return;
-  recordResult(viewDay, {
+  idResults.record(viewDay, {
     guesses: guesses.slice(),
     solved,
     tries: solved ? guesses.length : null,
@@ -539,23 +545,6 @@ function recordCurrentResult(solved) {
     rejected,
     fmt: pool.fmt,
   });
-}
-
-// Drop results/archive entries for puzzle numbers that can't legitimately
-// exist — day > today (you can't have finished a future puzzle) or a bad key.
-// This self-heals stale data left after a day→answer re-indexing (e.g. an epoch
-// change), which would otherwise show impossible future numbers in stats/history.
-function pruneFutureEntries(key) {
-  try {
-    const store = JSON.parse(localStorage.getItem(key));
-    if (!store || typeof store !== "object") return;
-    let changed = false;
-    for (const k of Object.keys(store)) {
-      const d = Number(k);
-      if (!Number.isInteger(d) || d < 0 || d > DAY) { delete store[k]; changed = true; }
-    }
-    if (changed) localStorage.setItem(key, JSON.stringify(store));
-  } catch (e) { /* corrupt: leave it */ }
 }
 
 // Recover a finished daily left in muldle-v1 from a previous day before the
@@ -569,54 +558,11 @@ function migrateStaleDaily() {
     const gs = e.guesses;
     const solved = gs[gs.length - 1] === answerForDay(s.day, e.fmt);
     if (!solved && gs.length < MAX_GUESSES) return; // unfinished — not a result
-    recordResult(s.day, {
+    idResults.record(s.day, {
       guesses: gs, solved, tries: solved ? gs.length : null, playedOnDay: true,
       rejected: e.rejected, fmt: e.fmt,
     });
   } catch (e) { /* corrupt: nothing to migrate */ }
-}
-
-// Streaks count consecutive on-day dailies only (playedOnDay); an archive replay
-// never extends a daily streak. (Played / win % / distribution, by contrast,
-// cover every saved puzzle — see computeStats.)
-function currentStreak(store) {
-  // a loss today breaks the streak; not having played today yet does not
-  const t = store[DAY];
-  if (t && t.playedOnDay && !t.solved) return 0;
-  const start = (t && t.playedOnDay && t.solved) ? DAY : DAY - 1;
-  let n = 0;
-  for (let d = start; d >= 0; d--) {
-    const e = store[d];
-    if (e && e.playedOnDay && e.solved) n++; else break;
-  }
-  return n;
-}
-
-function computeStats() {
-  const store = loadResults();
-  // played / win % / distribution cover EVERY saved puzzle (dailies + archive
-  // replays), so they match the history list; only streaks are daily-only
-  const all = Object.keys(store).map(Number).filter(d => d >= 0 && d <= DAY && store[d]);
-  const solved = all.filter(d => store[d].solved);
-  const dist = [0, 0, 0, 0, 0, 0];
-  for (const d of solved) {
-    const t = store[d].tries;
-    if (t >= 1 && t <= MAX_GUESSES) dist[t - 1]++;
-  }
-  // max streak = longest run of consecutive on-day dailies solved
-  const dailySolved = all.filter(d => store[d].playedOnDay && store[d].solved).sort((a, b) => a - b);
-  let max = 0, run = 0, prev = null;
-  for (const d of dailySolved) {
-    run = (prev !== null && d === prev + 1) ? run + 1 : 1;
-    if (run > max) max = run;
-    prev = d;
-  }
-  const played = all.length, wins = solved.length;
-  return {
-    played, wins,
-    winPct: played ? Math.round((100 * wins) / played) : 0,
-    dist, cur: currentStreak(store), max,
-  };
 }
 
 /* ============ scoring (standard Wordle rules) ============ */
@@ -1003,8 +949,6 @@ function shakeCurrentRow() {
 
 const ALADIN_SRC = "https://aladin.cds.unistra.fr/AladinLite/api/v3/latest/aladin.js";
 const SIMBAD_TAP = "https://simbad.cds.unistra.fr/simbad/sim-tap/sync";
-const DEFAULT_FOV = 0.3; // degrees, used when SIMBAD has no angular size
-const MIN_FOV = 0.03;
 
 const panelEl = document.getElementById("object-panel");
 const captionEl = document.getElementById("object-caption");
@@ -1030,18 +974,44 @@ function loadAladin() {
   return aladinReady;
 }
 
-// Object type, angular size (-> field of view, SIMBAD-style: 2x major axis)
-// and magnitude (V, else B). Cached per identifier; a failed fetch is not
+// sizes.js (the sky view's object sizes, ~150 KB) loads with the sky view, not
+// with the page; shared with ABC. Never rejects: without it, viewFov falls
+// back to DEFAULT_FOV.
+let viewSizesReady = null;
+function loadViewSizes() {
+  if (!viewSizesReady) {
+    viewSizesReady = new Promise(resolve => {
+      if (typeof VIEW_SIZES !== "undefined") { resolve(); return; }
+      const s = document.createElement("script");
+      s.src = "sizes.js";
+      s.onload = s.onerror = () => resolve();
+      document.head.appendChild(s);
+    });
+  }
+  return viewSizesReady;
+}
+
+// point a reused Aladin view (shared with ABC): north up again first — a
+// two-finger twist on a phone rotates the view and gotoRaDec keeps it (Aladin
+// 3.8 ignores setRotation(0); 360 is the same angle and works)
+function aimSkyView(view, pos, fov) {
+  if (typeof view.getRotation === "function" && view.getRotation() % 360) view.setRotation(360);
+  view.gotoRaDec(pos[0], pos[1]);
+  view.setFov(fov);
+}
+
+// Object type and magnitude (V, else B); the sky view's size comes from
+// sizes.js, not from here. Cached per identifier; a failed fetch is not
 // cached so a later guess retries. `found` distinguishes an object SIMBAD
 // doesn't know (false: a null ident, i.e. a v2 answer with no SIMBAD object of
 // its own, or an id SIMBAD doesn't resolve) from a failed fetch (null).
 const objectInfoCache = new Map();
-const NOT_IN_SIMBAD = { found: false, fov: DEFAULT_FOV, otype: "", mag: null, band: "", typeDesc: "" };
+const NOT_IN_SIMBAD = { found: false, otype: "", mag: null, band: "", typeDesc: "" };
 
 function fetchObjectInfo(ident) {
   if (ident === null) return Promise.resolve(NOT_IN_SIMBAD);
   if (objectInfoCache.has(ident)) return objectInfoCache.get(ident);
-  const q = "SELECT basic.otype_txt, basic.galdim_majaxis, allfluxes.V, allfluxes.B, " +
+  const q = "SELECT basic.otype_txt, allfluxes.V, allfluxes.B, " +
     "otypedef.description " +
     "FROM ident JOIN basic ON ident.oidref = basic.oid " +
     "LEFT JOIN allfluxes ON allfluxes.oidref = basic.oid " +
@@ -1054,20 +1024,18 @@ function fetchObjectInfo(ident) {
     .then(j => {
       const found = !!(j.data && j.data.length);
       const row = (j.data && j.data[0]) || [];
-      const majArcmin = row[1];
-      const mag = row[2] ?? row[3];
+      const mag = row[1] ?? row[2];
       return {
         found,
         otype: row[0] || "",
-        fov: majArcmin ? Math.max((majArcmin * 2) / 60, MIN_FOV) : DEFAULT_FOV,
         mag: mag ?? null,
-        band: row[2] != null ? "V" : row[3] != null ? "B" : "",
-        typeDesc: row[4] || "",
+        band: row[1] != null ? "V" : row[2] != null ? "B" : "",
+        typeDesc: row[3] || "",
       };
     })
     .catch(() => {
       objectInfoCache.delete(ident);
-      return { found: null, fov: DEFAULT_FOV, otype: "", mag: null, band: "", typeDesc: "" };
+      return { found: null, otype: "", mag: null, band: "", typeDesc: "" };
     });
   objectInfoCache.set(ident, p);
   return p;
@@ -1235,18 +1203,18 @@ function showObject(word) {
   spinner.className = "spinner";
   captionEl.append(" ", spinner);
   const gen = puzzleGen;
-  Promise.all([loadAladin(), fetchObjectInfo(ident)])
+  Promise.all([loadAladin(), fetchObjectInfo(ident), loadViewSizes()])
     .then(([, info]) => {
       // skip if the puzzle was reset or another object was clicked meanwhile
       if (gen !== puzzleGen || shownId !== word) return;
+      const fov = viewFov(word);
       if (aladinView) {
-        aladinView.gotoRaDec(pos[0], pos[1]);
-        aladinView.setFov(info.fov);
+        aimSkyView(aladinView, pos, fov);
       } else {
         aladinView = A.aladin("#aladin-lite-div", {
           survey: surveyCtl ? surveyCtl.current() : "P/DSS2/color",
           target: pos[0] + " " + pos[1],
-          fov: info.fov,
+          fov,
           showFullscreenControl: false,
           showLayersControl: false,
           showFrame: false,
@@ -1644,115 +1612,13 @@ navPrevBtn.addEventListener("click", () => { if (viewDay > 0) goToPuzzle(viewDay
 navNextBtn.addEventListener("click", () => { if (viewDay < DAY) goToPuzzle(viewDay + 1); navNextBtn.blur(); });
 navTodayBtn.addEventListener("click", () => { if (viewDay !== DAY) goToPuzzle(DAY); navTodayBtn.blur(); });
 
-/* ============ stats & history dialog (ID mode; ABC renders its own into the
-   same shared dialog — see abc.js) ============ */
+/* ============ stats & history dialog (stats.js renders it; ABC routes the
+   shared dialog to its own store — see abc.js) ============ */
 
 const statsDialog = document.getElementById("stats-dialog");
 const statsContent = document.getElementById("stats-content");
 
-// one stat tile: big value over a small label
-function statTile(label, value) {
-  const t = document.createElement("div"); t.className = "stat-tile";
-  const v = document.createElement("div"); v.className = "stat-val"; v.textContent = String(value);
-  const l = document.createElement("div"); l.className = "stat-label"; l.textContent = label;
-  t.append(v, l);
-  return t;
-}
-
-// Render the stats + history view into <container>. In the settings dialog the
-// clear control + privacy note are included; the inline post-game view (below a
-// finished board) passes includeClear:false to omit them.
-function renderStats(container, { includeClear = true } = {}) {
-  const s = computeStats();
-  const store = loadResults();
-  container.replaceChildren();
-
-  const h = document.createElement("h2"); h.textContent = "Stats & history — ID";
-  container.appendChild(h);
-
-  const tiles = document.createElement("div"); tiles.className = "stats-tiles";
-  tiles.append(
-    statTile("Played", s.played),
-    statTile("Win %", s.winPct),
-    statTile("Streak", s.cur),
-    statTile("Max streak", s.max),
-  );
-  container.appendChild(tiles);
-
-  const distHead = document.createElement("h3"); distHead.textContent = "Guess distribution";
-  container.appendChild(distHead);
-  const dist = document.createElement("div"); dist.className = "stats-dist";
-  const maxCount = Math.max(1, ...s.dist);
-  const todayTries = (store[DAY] && store[DAY].playedOnDay && store[DAY].solved) ? store[DAY].tries : null;
-  s.dist.forEach((count, i) => {
-    const row = document.createElement("div"); row.className = "dist-row";
-    const num = document.createElement("span"); num.className = "dist-num"; num.textContent = String(i + 1);
-    const bar = document.createElement("span"); bar.className = "dist-bar";
-    if (i + 1 === todayTries) bar.classList.add("current");
-    bar.style.width = (count / maxCount) * 100 + "%";
-    bar.textContent = String(count);
-    row.append(num, bar);
-    dist.appendChild(row);
-  });
-  container.appendChild(dist);
-
-  const histHead = document.createElement("h3"); histHead.textContent = "History";
-  container.appendChild(histHead);
-  const days = Object.keys(store).map(Number).filter(d => d <= DAY).sort((a, b) => b - a);
-  if (!days.length) {
-    const empty = document.createElement("p"); empty.className = "stats-empty";
-    empty.textContent = "No games recorded yet — finish a puzzle and it shows up here.";
-    container.appendChild(empty);
-  } else {
-    const list = document.createElement("div"); list.className = "history-list";
-    for (const d of days) {
-      const e = store[d];
-      const row = document.createElement("button");
-      row.type = "button"; row.className = "history-row";
-      row.title = "Open puzzle #" + d;
-      row.addEventListener("click", () => { statsDialog.close(); goToPuzzle(d); });
-      const swatch = document.createElement("span");
-      swatch.className = "history-swatch " + (e.solved ? "solved" : "lost");
-      const label = document.createElement("span"); label.className = "history-label";
-      label.textContent = "Puzzle #" + d;
-      const outcome = document.createElement("span"); outcome.className = "history-outcome";
-      outcome.textContent = (e.solved ? e.tries : "X") + "/" + MAX_GUESSES;
-      row.append(swatch, label, outcome);
-      if (!e.playedOnDay) {
-        const tag = document.createElement("span"); tag.className = "history-tag"; tag.textContent = "archive";
-        row.appendChild(tag);
-      }
-      list.appendChild(row);
-    }
-    container.appendChild(list);
-  }
-
-  if (!includeClear) return;
-
-  const note = document.createElement("p"); note.className = "stats-note";
-  note.textContent = "Stored only in this browser — nothing is ever sent anywhere.";
-  container.appendChild(note);
-
-  // two-step clear (privacy / shared devices): first click arms, second wipes
-  const clearBtn = document.createElement("button");
-  clearBtn.type = "button"; clearBtn.className = "stats-clear";
-  clearBtn.textContent = "Clear history & stats";
-  let armed = false;
-  clearBtn.addEventListener("click", () => {
-    if (!armed) { armed = true; clearBtn.textContent = "Click again to clear — can't be undone"; clearBtn.classList.add("armed"); return; }
-    // also drop today's saved game so a finished daily isn't re-recorded on the
-    // next load (renderPuzzleState would otherwise resurrect it into the store)
-    try {
-      localStorage.removeItem(RESULTS_KEY);
-      localStorage.removeItem(ARCHIVE_KEY);
-      localStorage.removeItem(STORAGE_KEY);
-    } catch (e) { /* ignore */ }
-    renderStats(container, { includeClear });
-  });
-  container.appendChild(clearBtn);
-}
-
-function openStats() { settingsDialog.close(); renderStats(statsContent); statsDialog.showModal(); }
+function openStats() { settingsDialog.close(); idResults.render(statsContent); statsDialog.showModal(); }
 document.getElementById("stats-button").addEventListener("click", openStats);
 document.getElementById("stats-close").addEventListener("click", () => statsDialog.close());
 statsDialog.addEventListener("close", () => setTimeout(() => { try { settingsBtn.blur(); } catch (e) { /* ignore */ } }, 0));
@@ -1826,7 +1692,7 @@ function showPostGame() {
   // the keyboard is no use once the puzzle is over — hide it and surface the
   // stats & history (no clear control) below the board in its place
   keyboardWrapEl.hidden = true;
-  renderStats(postGameStatsEl, { includeClear: false });
+  idResults.render(postGameStatsEl, { includeClear: false });
   // countdown only for today's daily — a practice or archived puzzle doesn't roll over
   const isDaily = !randomId && viewDay === DAY;
   countdownEl.hidden = !isDaily;
@@ -1848,8 +1714,8 @@ loadSettings();
 hardModeToggle.checked = hardMode;
 byCatalogueToggle.checked = byCatalogue;
 stampFormats();      // every save gets its fmt before anything reads it
-pruneFutureEntries(RESULTS_KEY);  // drop stale entries for impossible future numbers
-pruneFutureEntries(ARCHIVE_KEY);
+MuldleStats.pruneFuture(RESULTS_KEY, DAY); // drop stale entries for impossible future numbers
+MuldleStats.pruneFuture(ARCHIVE_KEY, DAY);
 migrateStaleDaily(); // rescue a finished daily from a past day before it's lost
 
 // initial puzzle: a ?p=<day> for the active mode opens that archived puzzle;
