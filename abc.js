@@ -1,13 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // ABC mode: a Wordle over the common NAME of a deep-sky object (e.g. "ORION
 // NEBULA"). Self-contained and additive — ID mode (game.js) is untouched.
-// Reads ABC_NAMES (names.js) for the answer pool and CAT_* (data.js) for the
-// sky reveal. Also owns the ID<->ABC flip at the bottom of the file.
+// Reads ABC_NAMES (names.js, v1) and ABC_NAMES_V2 (names_v2.js, v2) for the
+// answer pools, and game.js's era switch (ERA_V2_START) and catalogue pools
+// (poolFor, simbadQuery) for the sky reveal. Also owns the ID<->ABC flip at
+// the bottom of the file.
 //
 // Wrapped in an IIFE: game.js and abc.js are both classic scripts sharing one
 // global lexical scope, and many top-level names (ANSWER, scoreGuess, guesses,
-// buildBoard, ...) exist in both — without this they'd collide. The only thing
-// shared across the boundary is window.__muldleMode (read by game.js's keydown).
+// buildBoard, ...) exist in both — without this they'd collide. Shared across
+// the boundary: window.__muldleMode (read by game.js's keydown) and game.js's
+// top-level helpers named above.
 (function () {
 "use strict";
 
@@ -100,10 +103,26 @@ const ABC_SEED = 20260916;
 // 09-08, which made ABC read the same puzzle number as ID.)
 const ABC_EPOCH = { y: 2026, m: 9, d: 16 }; // 2026-09-16 = ABC puzzle #0
 const SETTINGS_KEY = "muldle-settings-v1"; // shared with game.js (read-only here)
+// today's daily (or the random name): { day, name, guesses, randomName, fmt }
 const ABC_STORAGE_KEY = "muldle-abc-v1";
-// off-day puzzles browsed via the navigator, keyed by number: { [day]: guesses[] }.
+// off-day puzzles browsed via the navigator, keyed by number: { [day]: { guesses, fmt } }
+// (bare guesses[] arrays before the format flag; stampAbcFormats converts them).
 // Separate from muldle-abc-v1 so browsing never clobbers today's daily.
 const ABC_ARCHIVE_KEY = "muldle-abc-archive-v1";
+
+// Every ABC save carries `fmt`, from its own table (mirrored in CLAUDE.md); a
+// new format is a new row and a row never changes meaning. A stored entry whose
+// fmt isn't a row valid for its era is skipped and left untouched in storage.
+const ABC_FORMATS = {
+  // the common name as tiles: letters and digits upper-cased, punctuation kept,
+  // spaces dropped ("ORIONNEBULA", "CODDINGTON'SNEBULA"). Every era so far.
+  1: { eras: ["v1", "v2"] },
+};
+const ABC_FMT_CURRENT = 1;
+function abcKnownFormat(fmt, era) {
+  return Number.isInteger(fmt) && Object.prototype.hasOwnProperty.call(ABC_FORMATS, fmt) &&
+    ABC_FORMATS[fmt].eras.includes(era);
+}
 
 // name -> slots (one per non-space char), words (slot-index groups for layout),
 // and the spaceless uppercased answer string
@@ -126,13 +145,37 @@ function buildAnswerModel(name) {
 // spaceless uppercase key ("Orion Nebula" -> "ORIONNEBULA") for name<->id lookup
 const nameKey = (name) => buildAnswerModel(name).answer;
 
-const ABC_ORDER = shuffledOrder(ABC_NAMES, ABC_SEED);
-const DAY = dayIndex(ABC_EPOCH);
-const POOL = ABC_ORDER.length;
-const TODAY = ABC_ORDER[((DAY % POOL) + POOL) % POOL];
+// Eras switch on game.js's ERA_V2_START, the same date as ID mode (ABC puzzle
+// #19). v1: the 134 v1 names in their frozen order (tools/test_golden.mjs pins
+// it). v2: names_v2.js's 179 names (v1's plus the new catalogues' objects) in a
+// new seeded order, also pinned once it ships. An entry's `id` is in its era's
+// catalogue format: v1 "NGC0224" (format 1), v2 "M31".
+// the first seed from 20261008 on whose order never has the same object on the
+// same date as ID mode in the first 10 years (tools/test_golden.mjs checks)
+const ABC_V2_SEED = 20261013;
+const ABC_V2_FIRST_DAY = daysBetween(ABC_EPOCH, ERA_V2_START);
+function abcEraOfDay(d) { return d >= ABC_V2_FIRST_DAY ? "v2" : "v1"; }
+const ABC_ERAS = {
+  v1: { names: ABC_NAMES, idNames: ID_NAMES, catFmt: 1 },
+  v2: { names: ABC_NAMES_V2, idNames: ID_NAMES_V2, catFmt: 2 },
+};
 
+const ABC_ORDER = shuffledOrder(ABC_NAMES, ABC_SEED); // v1, frozen
+// the v1 {name, id} entry for any ABC puzzle number (wraps mod 134)
+function v1EntryForDay(d) { return ABC_ORDER[((d % ABC_ORDER.length) + ABC_ORDER.length) % ABC_ORDER.length]; }
+// v2: the names v1 already played (ABC #0-#18) close the first cycle, so the
+// switch doesn't bring back a name from days before; each part is shuffled
+const ABC_V1_PLAYED = new Set(Array.from({ length: ABC_V2_FIRST_DAY }, (_, d) => v1EntryForDay(d).name));
+const ABC_V2_ORDER = shuffledOrder(ABC_NAMES_V2.filter(e => !ABC_V1_PLAYED.has(e.name)), ABC_V2_SEED)
+  .concat(shuffledOrder(ABC_NAMES_V2.filter(e => ABC_V1_PLAYED.has(e.name)), ABC_V2_SEED));
+const DAY = dayIndex(ABC_EPOCH);
 // the {name, id} entry for any ABC puzzle number (the navigator plays past ones)
-function entryForDay(d) { return ABC_ORDER[((d % POOL) + POOL) % POOL]; }
+function entryForDay(d) {
+  if (abcEraOfDay(d) === "v1") return v1EntryForDay(d);
+  const k = d - ABC_V2_FIRST_DAY, n = ABC_V2_ORDER.length;
+  return ABC_V2_ORDER[((k % n) + n) % n];
+}
+const TODAY = entryForDay(DAY);
 
 // which face is active on load (game.js's flip owns it later). Read the
 // persisted key directly — MODE_KEY isn't defined until the flip section.
@@ -155,13 +198,16 @@ function readUrlDay() {
   } catch (e) { return null; }
 }
 
-// every known name -> its representative id (so a guessed real name can be
-// shown in the sky view), and id -> proper-case name (for reveal captions).
-// NAME_BY_KEY stays on ABC_NAMES (unique name -> representative id); NAME_BY_ID
-// uses ID_NAMES (every id) so ids that share a name resolve too.
-const NAME_BY_KEY = new Map(ABC_NAMES.map(e => [nameKey(e.name), e.id]));
-const NAME_BY_ID = new Map();
-for (const e of ID_NAMES) if (!NAME_BY_ID.has(e.id)) NAME_BY_ID.set(e.id, e.name);
+// per era: every known name -> its representative id (so a guessed real name
+// can be shown in the sky view), and id -> proper-case name (for reveal
+// captions). byKey stays on the era's unique names (name -> representative
+// id); byId uses its per-answer list (every id) so ids that share a name
+// resolve too.
+for (const e of Object.values(ABC_ERAS)) {
+  e.byKey = new Map(e.names.map(n => [nameKey(n.name), n.id]));
+  e.byId = new Map();
+  for (const n of e.idNames) if (!e.byId.has(n.id)) e.byId.set(n.id, n.name);
+}
 
 function isHardMode() {
   try {
@@ -173,11 +219,15 @@ function isHardMode() {
 
 /* ============ state (the active puzzle: today's, or a random practice one) === */
 
+let abcEra = abcEraOfDay(DAY); // era of the puzzle in play (a random name: today's)
 let activeName = TODAY.name;
 let activeId = TODAY.id;
 let MODEL = buildAnswerModel(activeName);
 let ANSWER = MODEL.answer;
 let randomName = null; // when practising a random named object
+
+// the era in play: its names, name/id lookups and catalogue format
+const era = () => ABC_ERAS[abcEra];
 
 let guesses = [];   // submitted spaceless uppercase strings (length ANSWER.length)
 let current = [];   // per-slot typed chars (fixed slots pre-filled)
@@ -186,7 +236,8 @@ let cursor = 0;     // slot the next typed char goes into; slots.length = past t
 let finished = false;
 let abcViewDay = DAY; // puzzle number in play: today's (DAY) or an archived one (< DAY)
 
-function setActive(name, id, isRandom) {
+function setActive(name, id, isRandom, eraKey) {
+  abcEra = eraKey;
   activeName = name;
   activeId = id;
   randomName = isRandom ? name : null;
@@ -224,17 +275,82 @@ function prevFreeSlot(i) {
   return i;
 }
 
+// A stored entry of ABC puzzle `day` as this code reads it. A save without
+// `fmt` was written by pre-release code, so it is format 1 (a bare-array
+// archive entry is { guesses, fmt: 1 }) — unless its day is in a later era:
+// then pre-release code was still running after the switch and played that
+// day's v1 name, which no longer is the day's answer, and ABC saves (unlike
+// ID's formats) can't say which era they were played in. Such an entry reads
+// as absent (null), and stampAbcFormats drops it.
+function normAbcEntry(e, day) {
+  if (Array.isArray(e)) e = { guesses: e };
+  if (!e || typeof e !== "object" || "fmt" in e) return e;
+  return abcEraOfDay(day) === "v1" ? { ...e, fmt: 1 } : null;
+}
+
+// Writes normAbcEntry's reading back to every store on load, like game.js's
+// stampFormats. Idempotent; the readers apply the same rule, so a failed write
+// changes nothing. A present but unknown fmt is left alone.
+function stampAbcFormats() {
+  const update = (key, fn) => {
+    try {
+      const raw = localStorage.getItem(key);
+      const v = JSON.parse(raw);
+      if (!v || typeof v !== "object") return;
+      const out = fn(v);
+      if (out === null) localStorage.removeItem(key);
+      else if (JSON.stringify(out) !== raw) localStorage.setItem(key, JSON.stringify(out));
+    } catch (e) { /* corrupt or full: the readers normalise anyway */ }
+  };
+  update(ABC_STORAGE_KEY, s => normAbcEntry(s, s.day));
+  for (const key of [ABC_ARCHIVE_KEY, ABC_RESULTS_KEY]) {
+    update(key, store => {
+      for (const k of Object.keys(store)) {
+        const e = normAbcEntry(store[k], Number(k));
+        if (e === null) delete store[k]; else store[k] = e;
+      }
+      return store;
+    });
+  }
+}
+
+// a stored entry of ABC puzzle `day` this code must leave alone: its fmt isn't
+// one ABC_FORMATS allows in that puzzle's era
+function foreignAbcEntry(e, day) {
+  e = normAbcEntry(e, day);
+  return !!e && typeof e === "object" && !abcKnownFormat(e.fmt, abcEraOfDay(day));
+}
+
+// the guesses of a stored entry of puzzle `day` that fit this board, or null
+// if there's no usable entry (none, foreign, or no guesses array)
+function entryGuesses(e, day) {
+  e = normAbcEntry(e, day);
+  if (!e || typeof e !== "object" || !Array.isArray(e.guesses) || foreignAbcEntry(e, day)) return null;
+  return e.guesses.filter(g => typeof g === "string" && g.length === ANSWER.length);
+}
+
 // today's daily (and the random object) live in muldle-abc-v1, keyed on DAY;
-// an off-day puzzle browsed via the navigator goes to the archive store
+// an off-day puzzle browsed via the navigator goes to the archive store.
+// Neither overwrites a foreign entry.
 function saveState() {
   if (randomName || abcViewDay === DAY) {
+    if (foreignAbcEntry(loadAbcToday(), DAY)) return;
     localStorage.setItem(ABC_STORAGE_KEY,
-      JSON.stringify({ day: DAY, name: activeName, guesses, randomName }));
+      JSON.stringify({ day: DAY, name: activeName, guesses, randomName, fmt: ABC_FMT_CURRENT }));
   } else {
     const a = loadAbcArchive();
-    a[abcViewDay] = guesses;
+    if (foreignAbcEntry(a[abcViewDay], abcViewDay)) return;
+    a[abcViewDay] = { guesses, fmt: ABC_FMT_CURRENT };
     localStorage.setItem(ABC_ARCHIVE_KEY, JSON.stringify(a));
   }
+}
+
+// muldle-abc-v1's entry if it is today's, else null
+function loadAbcToday() {
+  try {
+    const s = JSON.parse(localStorage.getItem(ABC_STORAGE_KEY));
+    return s && s.day === DAY ? s : null;
+  } catch (e) { return null; }
 }
 
 function loadAbcArchive() {
@@ -247,43 +363,29 @@ function loadAbcArchive() {
 // today's daily guesses from muldle-abc-v1 (empty if a random save sits there
 // or the stored name no longer matches today's), filtered to this board's width
 function loadTodayAbcGuesses() {
-  try {
-    const s = JSON.parse(localStorage.getItem(ABC_STORAGE_KEY));
-    if (s && s.day === DAY && !s.randomName && s.name === TODAY.name && Array.isArray(s.guesses)) {
-      return s.guesses.filter(g => typeof g === "string" && g.length === ANSWER.length);
-    }
-  } catch (e) { /* corrupt: fresh */ }
-  return [];
+  const s = loadAbcToday();
+  return (s && !s.randomName && s.name === TODAY.name && entryGuesses(s, DAY)) || [];
 }
 
 // off-day guesses for <day>: the navigator's archive store, or — for a past
 // daily played live but never replayed here — the persistent results store
 function loadArchivedAbcGuesses(day) {
-  const valid = g => typeof g === "string" && g.length === ANSWER.length;
-  const gs = loadAbcArchive()[day];
-  if (Array.isArray(gs)) return gs.filter(valid);
-  const rec = loadAbcResults()[day];
-  return rec && Array.isArray(rec.guesses) ? rec.guesses.filter(valid) : [];
+  return entryGuesses(loadAbcArchive()[day], day) || entryGuesses(loadAbcResults()[day], day) || [];
 }
 
 function loadState() {
-  try {
-    const s = JSON.parse(localStorage.getItem(ABC_STORAGE_KEY));
-    if (!s || s.day !== DAY) return;
-    // restore a random-practice name if one was in play and still known
-    if (typeof s.randomName === "string" && NAME_BY_KEY.has(nameKey(s.randomName))) {
-      setActive(s.randomName, NAME_BY_KEY.get(nameKey(s.randomName)), true);
-    }
-    if (s.name === activeName && Array.isArray(s.guesses)) {
-      guesses = s.guesses.filter(g => typeof g === "string" && g.length === ANSWER.length);
-    }
-  } catch (e) { /* corrupt: start fresh */ }
+  const s = normAbcEntry(loadAbcToday(), DAY);
+  if (!s || foreignAbcEntry(s, DAY)) return;
+  // restore a random-practice name if one was in play and still known
+  const key = typeof s.randomName === "string" ? nameKey(s.randomName) : null;
+  if (key && era().byKey.has(key)) setActive(s.randomName, era().byKey.get(key), true, abcEraOfDay(DAY));
+  if (s.name === activeName) guesses = entryGuesses(s, DAY) || [];
 }
 
 /* ============ local play history + stats (no backend) ============ */
 
 // Persistent ABC results, keyed by puzzle number (mirrors game.js's ID store):
-//   { [day]: { guesses, solved, tries, playedOnDay } }. Outlives day rollover;
+//   { [day]: { guesses, solved, tries, playedOnDay, fmt } }. Outlives day rollover;
 // a finished daily is recorded at finish and migrated from a stale
 // muldle-abc-v1 on load. Local-only — nothing is transmitted.
 const ABC_RESULTS_KEY = "muldle-abc-results-v1";
@@ -299,10 +401,11 @@ function saveAbcResults(store) {
 }
 
 // A live-daily record (playedOnDay) is canonical & permanent — never overwritten
-// by a later archive replay or a reset-and-replay.
+// by a later archive replay or a reset-and-replay. Nor is a foreign record.
 function recordAbcResult(day, entry) {
   const store = loadAbcResults();
-  if (store[day] && store[day].playedOnDay) return;
+  const cur = normAbcEntry(store[day], day);
+  if (cur && (cur.playedOnDay || foreignAbcEntry(cur, day))) return;
   store[day] = entry;
   saveAbcResults(store);
 }
@@ -315,6 +418,7 @@ function recordCurrentAbcResult(solved) {
     solved,
     tries: solved ? guesses.length : null,
     playedOnDay: abcViewDay === DAY,
+    fmt: ABC_FMT_CURRENT,
   });
 }
 
@@ -338,15 +442,16 @@ function pruneFutureAbcEntries(key) {
 // loadState() would ignore it (day rollover). Runs once on load.
 function migrateStaleAbcDaily() {
   try {
-    const s = JSON.parse(localStorage.getItem(ABC_STORAGE_KEY));
-    if (!s || typeof s.day !== "number" || s.day >= DAY || s.randomName) return;
-    if (typeof s.name !== "string" || !Array.isArray(s.guesses)) return;
+    const raw = JSON.parse(localStorage.getItem(ABC_STORAGE_KEY));
+    const s = raw && typeof raw.day === "number" ? normAbcEntry(raw, raw.day) : null;
+    if (!s || s.day >= DAY || s.randomName) return;
+    if (typeof s.name !== "string" || !Array.isArray(s.guesses) || foreignAbcEntry(s, s.day)) return;
     const ans = buildAnswerModel(s.name).answer;
     const gs = s.guesses.filter(g => typeof g === "string" && g.length === ans.length);
     if (!gs.length) return;
     const solved = gs[gs.length - 1] === ans;
     if (!solved && gs.length < MAX_GUESSES) return; // unfinished
-    recordAbcResult(s.day, { guesses: gs, solved, tries: solved ? gs.length : null, playedOnDay: true });
+    recordAbcResult(s.day, { guesses: gs, solved, tries: solved ? gs.length : null, playedOnDay: true, fmt: s.fmt });
   } catch (e) { /* nothing to migrate */ }
 }
 
@@ -470,8 +575,8 @@ function renderCurrent() {
 function renderGuessRow(r, guess) {
   const rowEl = boardEl.children[r];
   rowEl.classList.add("guessed");
-  const id = NAME_BY_KEY.get(guess);
-  rowEl.title = id ? "Show " + (NAME_BY_ID.get(id) || simbadIdent(id)) + " in the sky view"
+  const id = era().byKey.get(guess);
+  rowEl.title = id ? "Show " + (era().byId.get(id) || spacedId(id)) + " in the sky view"
     : "Not a known object name";
   const score = scoreGuess(guess, ANSWER);
   for (let i = 0; i < MODEL.slots.length; i++) {
@@ -495,8 +600,9 @@ function upgradeKey(key, status) {
 }
 
 let messageTimer = null;
-function showMessage(text, sticky = false) {
+function showMessage(text, sticky = false, others = []) {
   messageEl.textContent = text;
+  appendOtherNames(messageEl, others); // game.js
   messageEl.classList.toggle("reveal", sticky);
   clearTimeout(messageTimer);
   if (!sticky && text) messageTimer = setTimeout(() => { messageEl.textContent = ""; }, 2500);
@@ -511,11 +617,12 @@ function shakeRow() {
 
 function updateInfo() {
   // the puzzle number now lives in the navigator; the info line carries context
+  const size = era().names.length;
   infoEl.textContent = randomName
-    ? `Random name · ${POOL} named objects`
+    ? `Random name · ${size} named objects`
     : abcViewDay !== DAY
-      ? `Archive · ${POOL} named objects`
-      : `${POOL} named objects`;
+      ? `Archive · ${size} named objects`
+      : `${size} named objects`;
 }
 
 function updateNav() {
@@ -539,10 +646,12 @@ let aladinView = null;
 let shownId = null; // catalogue id currently in the panel, or null
 let surveyCtl = null; // survey picker controller (surveys.js), built on first show
 
-// "NGC0224" -> "NGC 224", "IC1023A" -> "IC 1023A"
-function simbadIdent(id) {
-  const m = /^([A-Z]+)(\d{4})([A-F]?)$/.exec(id);
-  return m ? m[1] + " " + parseInt(m[2], 10) + m[3] : id;
+// an entry id's catalogue data (game.js's pool of the era in play): position,
+// constellation and the id SIMBAD knows the object by (null: none of its own)
+function catalogueEntry(id) {
+  const p = poolFor(abcEra, era().catFmt), w = fullWord(id), i = p.index.get(w);
+  return i === undefined ? { pos: null, con: "", ident: null }
+    : { pos: p.positions[i], con: p.constellations[i], ident: simbadQuery(w, p) };
 }
 
 let aladinReady = null;
@@ -563,9 +672,10 @@ function loadAladin() {
 // object type + field of view (2x SIMBAD major axis, like its own page)
 const infoCache = new Map();
 function fetchInfo(ident) {
+  if (ident === null) return Promise.resolve({ otype: "", fov: DEFAULT_FOV });
   if (infoCache.has(ident)) return infoCache.get(ident);
   const q = "SELECT basic.otype_txt, basic.galdim_majaxis FROM ident JOIN basic " +
-    "ON ident.oidref = basic.oid WHERE ident.id = '" + ident + "'";
+    "ON ident.oidref = basic.oid WHERE ident.id = '" + ident.replace(/'/g, "''") + "'";
   const url = SIMBAD_TAP + "?request=doQuery&lang=adql&format=json&query=" +
     encodeURIComponent(q);
   const p = fetch(url).then(r => r.json()).then(j => {
@@ -580,28 +690,32 @@ function fetchInfo(ident) {
 function markViewingRow() {
   for (let r = 0; r < MAX_GUESSES; r++) {
     boardEl.children[r].classList.toggle("viewing",
-      r < guesses.length && NAME_BY_KEY.get(guesses[r]) === shownId && shownId !== null);
+      r < guesses.length && era().byKey.get(guesses[r]) === shownId && shownId !== null);
   }
 }
 
 function renderCaption(id, otype) {
   const isTarget = id === activeId;
+  const { pos, con, ident } = catalogueEntry(id);
   const role = document.createElement("span");
   role.className = "object-role" + (isTarget ? " target" : "");
   role.textContent = isTarget ? "target" : "guess";
   const link = document.createElement("a");
-  const ident = simbadIdent(id);
-  link.href = "https://simbad.cds.unistra.fr/simbad/sim-basic?Ident=" +
-    encodeURIComponent(ident);
+  if (ident === null && pos) {
+    // no SIMBAD object of its own: a coordinate search instead of a dead page
+    link.href = "https://simbad.cds.unistra.fr/simbad/sim-coo?Coord=" +
+      encodeURIComponent(`${pos[0]} ${pos[1] >= 0 ? "+" : ""}${pos[1]}`) + "&Radius=2&Radius.unit=arcmin";
+  } else {
+    link.href = "https://simbad.cds.unistra.fr/simbad/sim-basic?Ident=" +
+      encodeURIComponent(ident || spacedId(id));
+  }
   link.target = "_blank";
   link.rel = "noopener";
-  link.textContent = NAME_BY_ID.get(id) || ident;
-  captionEl.replaceChildren(role, " ", link, " · ", ident);
+  link.textContent = era().byId.get(id) || spacedId(id);
+  captionEl.replaceChildren(role, " ", link, " · ", spacedId(id));
   if (otype) captionEl.append(" · " + otype);
   // constellation, for parity with ID mode's richer caption (CONSTELLATION_NAMES
   // is a game.js top-level const, shared across the two classic scripts)
-  const conIdx = CAT_IDENTIFIERS.indexOf(id);
-  const con = conIdx >= 0 ? CAT_CONSTELLATIONS[conIdx] : "";
   if (con) captionEl.append(" · " + (CONSTELLATION_NAMES[con] || con));
   if (finished && !isTarget) {
     const back = document.createElement("a");
@@ -643,9 +757,7 @@ function showObject(id) {
     }
   }
 
-  const ident = simbadIdent(id);
-  const idx = CAT_IDENTIFIERS.indexOf(id);
-  const pos = idx >= 0 ? CAT_POSITIONS[idx] : null;
+  const { pos, ident } = catalogueEntry(id);
   renderCaption(id, "");
   if (!pos) return;
   // spinner in the caption while the object's SIMBAD data is on its way
@@ -680,11 +792,18 @@ function showObject(id) {
   });
 }
 
+// the target's other established names for the reveal (game.js's otherNames
+// over the era's catalogue pool), never the name just played
+function revealOthers() {
+  const p = poolFor(abcEra, era().catFmt);
+  return otherNames(fullWord(activeId), p).filter(n => n !== activeName);
+}
+
 // clicking a submitted guess shows that object if it's a real named object;
 // clicking the shown one again returns to the target (game over) or closes it
 function rowClicked(r) {
   if (r >= guesses.length) return;
-  const id = NAME_BY_KEY.get(guesses[r]);
+  const id = era().byKey.get(guesses[r]);
   if (!id) { showMessage("That guess isn't a known object — nothing to show"); return; }
   if (id !== shownId) {
     showObject(id);
@@ -776,13 +895,13 @@ function submitGuess() {
   if (guess === ANSWER) {
     finished = true;
     recordCurrentAbcResult(true);
-    showMessage(`${WIN_MESSAGES[guesses.length - 1]} It was the ${activeName}.`, true);
+    showMessage(`${WIN_MESSAGES[guesses.length - 1]} It was the ${activeName}.`, true, revealOthers());
     showObject(activeId);
     showPostGame();
   } else if (guesses.length >= MAX_GUESSES) {
     finished = true;
     recordCurrentAbcResult(false);
-    showMessage(`Out of guesses — it was the ${activeName}.`, true);
+    showMessage(`Out of guesses — it was the ${activeName}.`, true, revealOthers());
     showObject(activeId);
     showPostGame();
   }
@@ -820,6 +939,7 @@ const statsContent = document.getElementById("stats-content");
 
 abcSettingsBtn.addEventListener("click", () => {
   backToDailyBtn.hidden = !randomName;
+  document.getElementById("by-catalogue-row").hidden = true; // ID mode's practice weighting
   settingsDialog.showModal();
 });
 settingsDialog.addEventListener("close", () => setTimeout(() => abcSettingsBtn.blur(), 0));
@@ -830,10 +950,10 @@ hardModeToggle.addEventListener("change", () => {
 });
 
 function startAbcPuzzle(name, id, isRandom, msg) {
-  setActive(name, id, isRandom);
   // a random object has no puzzle number: snap to today's slot so the URL drops
   // any archived ?p (else a reload re-enters the archive, discarding the random)
   if (isRandom) abcViewDay = DAY;
+  setActive(name, id, isRandom, abcEraOfDay(abcViewDay));
   guesses = [];
   finished = false;
   buildBoard();
@@ -861,13 +981,13 @@ function renderAbcState() {
   if (guesses.length && guesses[guesses.length - 1] === ANSWER) {
     finished = true;
     recordCurrentAbcResult(true);
-    showMessage(`Already solved — it was the ${activeName}.`, true);
+    showMessage(`Already solved — it was the ${activeName}.`, true, revealOthers());
     showObject(activeId);
     showPostGame();
   } else if (guesses.length >= MAX_GUESSES) {
     finished = true;
     recordCurrentAbcResult(false);
-    showMessage(`Out of guesses — it was the ${activeName}.`, true);
+    showMessage(`Out of guesses — it was the ${activeName}.`, true, revealOthers());
     showObject(activeId);
     showPostGame();
   }
@@ -881,7 +1001,7 @@ function goToAbcPuzzle(day) {
   day = Math.max(0, Math.min(DAY, day | 0));
   abcViewDay = day;
   const entry = entryForDay(day);
-  setActive(entry.name, entry.id, false);
+  setActive(entry.name, entry.id, false, abcEraOfDay(day));
   guesses = (day === DAY) ? loadTodayAbcGuesses() : loadArchivedAbcGuesses(day);
   buildBoard();
   buildKeyboard();
@@ -900,9 +1020,11 @@ function goToAbcPuzzle(day) {
   settingsDialog.close();
 }
 
+// a random named object of today's era (practice), never the current answer
 function randomEntry() {
+  const names = ABC_ERAS[abcEraOfDay(DAY)].names;
   let e;
-  do { e = ABC_NAMES[Math.floor(Math.random() * ABC_NAMES.length)]; }
+  do { e = names[Math.floor(Math.random() * names.length)]; }
   while (nameKey(e.name) === ANSWER);
   return e;
 }
@@ -1128,6 +1250,7 @@ function hidePostGame() {
 
 /* ============ init ============ */
 
+stampAbcFormats(); // every save gets its fmt before anything reads it
 pruneFutureAbcEntries(ABC_RESULTS_KEY); // drop stale entries from the epoch re-index
 pruneFutureAbcEntries(ABC_ARCHIVE_KEY);
 migrateStaleAbcDaily(); // rescue a finished daily from a past day before it's lost
@@ -1138,7 +1261,7 @@ const urlDay = readUrlDay();
 if (urlDay != null && urlDay !== DAY && activeModeOnLoad() === "abc") {
   abcViewDay = urlDay;
   const entry = entryForDay(urlDay);
-  setActive(entry.name, entry.id, false);
+  setActive(entry.name, entry.id, false, abcEraOfDay(urlDay));
   guesses = loadArchivedAbcGuesses(urlDay);
 } else {
   loadState();
@@ -1149,10 +1272,14 @@ if (window.__muldle) {
   window.__muldle.today = window.__muldle.today || {};
   window.__muldle.today.abc = DAY;
   window.__muldle.view.abc = abcViewDay;
+  window.__muldle.started = window.__muldle.started || {};
+  // for start.js: a guess made, or random practice (not a fresh daily)
+  window.__muldle.started.abc = () => guesses.length > 0 || !!randomName;
 }
 
 window.__abc = { get NAME() { return activeName; }, get ANSWER() { return ANSWER; },
-  DAY, POOL, get viewDay() { return abcViewDay; }, get model() { return MODEL; } }; // e2e/debug hook
+  DAY, get POOL() { return era().names.length; }, get era() { return abcEra; }, entryForDay,
+  get viewDay() { return abcViewDay; }, get model() { return MODEL; } }; // e2e/debug hook
 
 buildBoard();
 buildKeyboard();

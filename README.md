@@ -3,14 +3,20 @@
 **Play: <https://bertblookers.github.io/muldle/>**
 
 A daily Wordle-style game for astronomical catalogue identifiers. Each day
-there is one target object from the NGC or IC catalogue; you get six guesses
-to find its identifier, e.g. `NGC0042` or `IC1023A`.
+there is one target object from the Messier, NGC, IC, Melotte, Collinder,
+Caldwell or Barnard catalogues; you get six guesses to find its identifier,
+e.g. `M31`, `NGC42`, `Mel25` or `NGC1023A`.
 
 ## How to play
 
-- Type the full identifier: catalogue prefix (`NGC` or `IC`), four zero-padded
-  digits, plus a component letter if the object has one. Tiles left empty
-  count as blanks.
+- Type the full identifier: catalogue prefix (`M`, `NGC`, `IC`, `Mel`, `Cr`,
+  `C` or `B`), the number without leading zeros, plus a component letter if
+  the object has one. Tiles left empty count as blanks.
+- Each object is in the game once, under the identifier most people know it
+  by: the Andromeda Galaxy is `M31`, and guessing `NGC224` tells you so.
+- Puzzles before 5 October 2026 (#0–#26) use only NGC and IC; a puzzle you
+  played before then keeps the zero-padded spelling it was played in
+  (`NGC0042`).
 - Standard Wordle colours after each guess: green = right character in the
   right place, yellow = elsewhere in the identifier, grey = absent.
 - A hint panel describes each guessed object: constellation, object type,
@@ -71,9 +77,11 @@ with no affiliation to or endorsement by Josh Wardle or The New York Times.
 
 The astronomical data is not covered by the code license and is credited to
 its sources — see [ATTRIBUTION.md](ATTRIBUTION.md) for the full list
-(VizieR catalogues VII/239A and VI/42, SIMBAD, Aladin Lite — all CDS,
-Strasbourg — common names from SIMBAD, OpenNGC and Wikipedia, and the Noto
-Sans Cuneiform font). `data.js` is generated from the VizieR tables.
+(VizieR catalogues VII/239A, VII/220A and VI/42, SIMBAD, Aladin Lite — all
+CDS, Strasbourg — OpenNGC, the Caldwell, Melotte and Collinder lists, common
+names from SIMBAD, OpenNGC, Wikipedia and a few NASA and magazine pages, and
+the Noto Sans Cuneiform font). `data.js` (puzzles before 5 October 2026) and
+`data_v2.js` (from then on) are generated from those sources at build time.
 
 ## License
 

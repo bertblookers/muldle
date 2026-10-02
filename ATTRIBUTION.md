@@ -10,6 +10,33 @@ Identifiers, J2000 positions and component letters come from
 H. G. Corwin Jr., *Accurate Positions for NGC and IC Objects* (2004).
 Baked into `data.js` at build time.
 
+## Catalogue cross-identifications (the v2 pool, `data_v2.js`)
+
+Which Messier, NGC, IC, Melotte, Collinder, Caldwell and Barnard numbers
+name the same object is decided at build time from several sources:
+
+- **SIMBAD** cross-identifications (a committed snapshot; credited below).
+- **Corwin's identity notes** in VizieR VII/239A (credited above).
+- **OpenNGC** — the Name / Type / M / NGC / IC columns of
+  [OpenNGC](https://github.com/mattiaverga/OpenNGC) by Mattia Verga, used
+  under [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/).
+- Where those disagree, a per-pair verdict researched from Harold Corwin's
+  NGC/IC notes, Wolfgang Steinicke's *Revised NGC and IC*, OpenNGC, SIMBAD
+  and the NASA/IPAC Extragalactic Database (NED).
+  > This research has made use of the NASA/IPAC Extragalactic Database (NED),
+  > which is funded by the National Aeronautics and Space Administration and
+  > operated by the California Institute of Technology.
+- **Caldwell catalogue** — Patrick Moore, *Sky & Telescope* (December 1995);
+  the list is checked against Wikipedia's "Caldwell catalogue" (text under
+  CC BY-SA 4.0) and [SEDS](http://www.messier.seds.org/xtra/similar/caldwell.html).
+- **Melotte (1915) and Collinder (1931) catalogues** — the numbers are checked
+  against Wikipedia's "Melotte catalogue" and "Collinder catalogue" tables
+  (CC BY-SA 4.0), [astrobasics.de](https://astrobasics.de/en/gallery/catalogs/melotte/)
+  and the Collinder Catalogue list published by ukcloudmagnets.co.uk.
+- **Barnard catalogue** — [VizieR VII/220A](https://cdsarc.cds.unistra.fr/viz-bin/cat/VII/220A):
+  E. E. Barnard, *Catalogue of 349 Dark Objects in the Sky* (1927), for which
+  entries exist and their positions.
+
 ## Constellation boundaries — VizieR VI/42
 
 Per-object constellations are computed at build time from
@@ -20,7 +47,10 @@ PASP 99, 695 (1987).
 ## SIMBAD
 
 Object types, magnitudes and angular sizes are queried at runtime from the
-[SIMBAD database](https://simbad.cds.unistra.fr/).
+[SIMBAD database](https://simbad.cds.unistra.fr/). At build time SIMBAD also
+supplies cross-identifications (above) and the positions of the objects with
+no NGC/IC or Barnard entry (M40, M45, most Melotte and Collinder clusters,
+C9).
 
 > This research has made use of the SIMBAD database, operated at CDS,
 > Strasbourg, France (Wenger et al. 2000, A&AS 143, 9).
@@ -33,22 +63,30 @@ Object types, magnitudes and angular sizes are queried at runtime from the
 
 ## Common names
 
-The common names in `data/common_names.tsv` are drawn from three sources, and
-every name carries the exact source URL that attests both the name and its
-NGC/IC number (the `source` column). Names were selected and curated (one
-best-known full name per object; abbreviated forms spelled out); the
-underlying data was not otherwise altered.
+The common names (`names.js` for puzzles before 5 October 2026,
+`names_v2.js` from then on) were selected and curated at build time: one
+best-known full name per object, abbreviated forms spelled out, and a name
+kept only if a source page names the object together with one of its
+catalogue numbers. The other names shown after a solve (`aka.js`) were
+curated the same way, each attested in full next to one of the object's
+numbers. The underlying data was not otherwise altered. Sources:
 
 - **SIMBAD** `NAME` identifiers (CDS; credited above).
 - **OpenNGC** — the *Common names* column of
   [OpenNGC](https://github.com/mattiaverga/OpenNGC) by Mattia Verga, used
   under [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/).
 - **Wikipedia** — English Wikipedia articles by their contributors, text
-  under [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/);
-  the per-object article links are in the `source` column.
+  under [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/).
+- For a few objects: NASA
+  ([Astronomy Picture of the Day](https://apod.nasa.gov/) and the
+  [Hubble Caldwell catalog](https://science.nasa.gov/mission/hubble/science/explore-the-night-sky/hubble-caldwell-catalog/)),
+  [ESA](https://www.esa.int/) and [ESO](https://www.eso.org/) releases,
+  and articles in *Sky & Telescope*, *Astronomy*, *Astronomy Now* and *BBC
+  Sky at Night Magazine*. Only the names are used, as facts; no text is
+  copied.
 
-In the ShareAlike spirit of those sources, this curated list
-(`data/common_names.tsv`) is in turn offered under
+In the ShareAlike spirit of those sources, this curated list (as shipped in
+`names.js`, `names_v2.js` and `aka.js`) is in turn offered under
 [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/): anyone is
 welcome to reuse it, with attribution, under the same terms.
 

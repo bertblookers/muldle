@@ -3,33 +3,28 @@
 
 /* ============ configuration ============ */
 
-// identifier anatomy: catalogue prefix letters + 4-digit zero-padded number +
-// optional component letter, e.g. "NGC0042", "IC1023A"
-const ID_RE = /^([A-Z]+)(\d{4})([A-F]?)$/;
+// identifier anatomy: catalogue prefix + number + optional component letter,
+// e.g. "NGC0042" (format 1), "NGC42", "Mel25", "IC1023A" (format 2). How the
+// number is written is a save's format (ID_FORMATS below).
+const ID_RE = /^([A-Za-z]+)(\d+)([A-Z]?)$/;
 const MAX_GUESSES = 6;
 const BLANK = " ";             // internal representation of an empty tile
 
-// the longest identifier sets the board width; shorter ones (plain NGC,
-// everything IC) pad with trailing blanks, all WORD_LEN tiles are playable
-const WORD_LEN = CAT_IDENTIFIERS.reduce((m, id) => Math.max(m, id.length), 0);
+// the longest identifier (NGC####L, in either era) sets the board width;
+// shorter ones pad with trailing blanks, all WORD_LEN tiles are playable
+const WORD_LEN = CAT_IDENTIFIERS.concat(V2_IDS).reduce((m, id) => Math.max(m, id.length), 0);
 
-// Daily puzzle: a fixed seed defines one fixed shuffled order of the
-// identifier list. EPOCH is day 0 of that order.
-const SHUFFLE_SEED = 20260908;
+// puzzle numbers count days from EPOCH, across every era
 const EPOCH = { y: 2026, m: 9, d: 8 }; // 2026-09-08 = puzzle #0
 
-const SUFFIX_LETTERS = [...new Set(
-  CAT_IDENTIFIERS.map(id => ID_RE.exec(id)[3]).filter(Boolean)
-)].sort();
-
-// every letter that can appear somewhere in a guess (prefix or suffix)
-const LETTER_KEYS = [...new Set(
-  CAT_IDENTIFIERS.flatMap(id => [...ID_RE.exec(id)[1]]).concat(SUFFIX_LETTERS)
-)].sort();
-
-// catalogue id "NGC0042" / "IC1023A" -> padded playable word
+// an id as a row of tiles: uppercase ("Mel25" -> "MEL25"), trailing blanks
 function fullWord(id) {
-  return id.padEnd(WORD_LEN, BLANK);
+  return id.toUpperCase().padEnd(WORD_LEN, BLANK);
+}
+
+// "NGC0042" -> "NGC42": a format-1 id in format 2 (format-2 ids pass through)
+function unpadId(id) {
+  return id.replace(/^([A-Za-z]+)0+(?=\d)/, "$1");
 }
 
 /* ============ daily answer selection ============ */
@@ -61,39 +56,289 @@ function todayIndex() {
   return Math.round((today - epoch) / 86400000);
 }
 
-const ORDER = shuffledOrder(CAT_IDENTIFIERS, SHUFFLE_SEED);
-const DAY = todayIndex();
-const N = ORDER.length;
-// the padded daily answer for any puzzle number (the navigator plays past ones);
-// today's is answerForDay(DAY). Wraps mod N, so it's defined for every integer.
-function answerForDay(d) { return fullWord(ORDER[((d % N) + N) % N]); }
-const ANSWER = answerForDay(DAY);
-const ALLOWED = new Set(CAT_IDENTIFIERS.map(fullWord));
-// real catalogue entries kept out of the game (no SIMBAD data — mostly IC
-// numbers that turned out to be stars or lost); rejected with an honest
-// message rather than "not a known object identifier"
-const EXCLUDED = new Set(CAT_EXCLUDED.map(fullWord));
-
-function displayName(padded) {
-  return padded.trim();
+// whole calendar days from date a to date b (local midnights; the rounding
+// absorbs a DST hour)
+function daysBetween(a, b) {
+  return Math.round((new Date(b.y, b.m - 1, b.d) - new Date(a.y, a.m - 1, a.d)) / 86400000);
 }
 
-// A minority of in-game objects have a well-known common name (curated in
-// data/common_names_v1.tsv). Returns the name or null. Used by the end-of-game
-// reveal. NAME_BY_ID is defined further down; this is only called at game end.
-function commonName(padded) {
-  return NAME_BY_ID.get(displayName(padded)) || null;
+const mod = (n, m) => ((n % m) + m) % m;
+
+/* ---- eras ---- */
+
+// An era freezes one answer pool, its order and its seeds. Eras start on a
+// calendar date at local midnight, the same date in ID and ABC mode (each with
+// its own puzzle numbers; abc.js reads ERA_V2_START). A new catalogue snapshot
+// or new names add an era and never edit one: players' history, archives and
+// ?p=N links depend on every past answer staying put. A switch date must come
+// after the deploy that introduces it, so no daily in progress changes answer.
+const ERA_V2_START = { y: 2026, m: 10, d: 5 }; // a Monday: v2's weeks start here
+const ID_ERAS = [
+  { key: "v1", firstDay: 0 },
+  { key: "v2", firstDay: daysBetween(EPOCH, ERA_V2_START) }, // puzzle #27
+];
+
+function eraOfDay(d) {
+  let era = ID_ERAS[0].key;
+  for (const e of ID_ERAS) if (d >= e.firstDay) era = e.key;
+  return era;
+}
+
+// The era a save of puzzle d in format fmt was played in. Format 1 exists
+// only in v1, so a format-1 save is a v1 game even on a later day: pre-release
+// code still running after the switch (a deploy that lands after some
+// player's midnight) played that day's v1 answer, and the save stays as played.
+function eraOf(d, fmt) {
+  return fmt === 1 ? "v1" : eraOfDay(d);
+}
+
+// v1 (puzzles #0-#26): NGC + IC. One seeded shuffle of the sorted, zero-padded
+// 12001-id list in data.js. Never change the list, the seed or shuffledOrder:
+// tools/test_golden.mjs pins every v1 answer. The order always comes from the
+// padded list (unpadding changes the sort: NGC100 < NGC31) and is then shown
+// in the save's format.
+const SHUFFLE_SEED = 20260908;
+const ORDER = shuffledOrder(CAT_IDENTIFIERS, SHUFFLE_SEED);
+const N = ORDER.length;
+// the v1 answer of puzzle d as a format-1 id ("NGC0042"); wraps mod N
+function v1AnswerForDay(d) { return ORDER[mod(d, N)]; }
+
+// v2 (from puzzle #27, 2026-10-05): M, NGC, IC, Mel, Cr, C and B, one answer
+// per object (data_v2.js). In every Monday-Sunday week two days, drawn by a
+// seeded RNG, come from the famous tier (Messier + Caldwell + every named
+// object, names_v2.js) and the other five from the rest. The k-th famous day
+// of the era takes the k-th object of a seeded shuffle of the tier, rest days
+// likewise; each sequence wraps mod its length. tools/test_golden.mjs pins it.
+const V2_FAMOUS_SEED = 20261005;
+const V2_REST_SEED = 20261006;
+const V2_WEEK_SEED = 20261007;
+const V2_FIRST_DAY = ID_ERAS[1].firstDay;
+const V2_FAMOUS_ORDER = shuffledOrder(V2_FAMOUS, V2_FAMOUS_SEED);
+const V2_FAMOUS_SET = new Set(V2_FAMOUS);
+const V2_REST_ORDER = shuffledOrder(V2_IDS.filter(id => !V2_FAMOUS_SET.has(id)), V2_REST_SEED);
+
+// the two famous days (0 = Monday ... 6 = Sunday) of v2 week w, ascending
+function famousDaysOfWeek(w) {
+  const rand = mulberry32((V2_WEEK_SEED + Math.imul(w, 0x9E3779B1)) >>> 0);
+  const a = Math.floor(rand() * 7);
+  let b = Math.floor(rand() * 6);
+  if (b >= a) b++;
+  return a < b ? [a, b] : [b, a];
+}
+
+// the v2 answer of puzzle d as a v2 id ("M31", "Mel25")
+function v2AnswerForDay(d) {
+  const k = d - V2_FIRST_DAY, w = Math.floor(k / 7), day = k - 7 * w;
+  const [a, b] = famousDaysOfWeek(w);
+  if (day === a || day === b) return V2_FAMOUS_ORDER[mod(2 * w + (day === b), V2_FAMOUS_ORDER.length)];
+  return V2_REST_ORDER[mod(5 * w + day - (a < day) - (b < day), V2_REST_ORDER.length)];
+}
+
+/* ---- formats ---- */
+
+// Every ID-mode save carries `fmt`: how its ids are written. One row per
+// format; a new format is a new row, and a row never changes meaning
+// (mirrored in CLAUDE.md). A save without one is from before the release, so
+// format 1 (normEntry); a stored entry whose fmt isn't a row is skipped and
+// left untouched in storage, never guessed at.
+const ID_FORMATS = {
+  // NGC/IC: prefix + 4 zero-padded digits + optional component letter
+  // ("NGC0031", "IC1023A"). Everything saved before the v2 release.
+  1: { eras: ["v1"] },
+  // catalogue prefix + unpadded number + optional component letter
+  // ("M31", "NGC31", "Mel25", "IC1023A")
+  2: { eras: ["v1", "v2"] },
+};
+const FMT_CURRENT = 2; // a puzzle with no guesses saved plays in this one
+
+function knownFormat(fmt, era) {
+  return Number.isInteger(fmt) && Object.prototype.hasOwnProperty.call(ID_FORMATS, fmt) &&
+    ID_FORMATS[fmt].eras.includes(era);
+}
+
+/* ---- pools: one era's guessable words in one format ---- */
+
+// SIMBAD's name for each catalogue (Caldwell has none: data_v2.js gives C9
+// and C99 their own query ids)
+const SIMBAD_CAT = { M: "M", NGC: "NGC", IC: "IC", Mel: "Cl Melotte", Cr: "Cl Collinder", B: "Barnard" };
+
+function makePool(era, fmt) {
+  const v1 = era === "v1";
+  const ids = !v1 ? V2_IDS : fmt === 1 ? CAT_IDENTIFIERS : CAT_IDENTIFIERS.map(unpadId);
+  const words = ids.map(fullWord);
+  const index = new Map(words.map((w, i) => [w, i]));
+  const asWord = id => fullWord(fmt === 1 ? id : unpadId(id)); // a v1 id in this format
+  // common names (names.js = v1, names_v2.js = v2) by word; the first wins
+  const names = new Map();
+  for (const e of v1 ? ID_NAMES : ID_NAMES_V2) {
+    const w = v1 ? asWord(e.id) : fullWord(e.id);
+    if (!names.has(w)) names.set(w, e.name);
+  }
+  // practice's catalogue weighting: per catalogue, the indices of its members
+  let members = V2_MEMBERS;
+  if (v1) {
+    members = { NGC: [], IC: [] };
+    CAT_IDENTIFIERS.forEach((id, i) => members[ID_RE.exec(id)[1]].push(i));
+  }
+  return {
+    era, fmt, ids, words, index, names, members,
+    positions: v1 ? CAT_POSITIONS : V2_POSITIONS,
+    constellations: v1 ? CAT_CONSTELLATIONS : V2_CONSTELLATIONS,
+    // real catalogue entries kept out of the game (no SIMBAD data, mostly IC
+    // numbers that turned out to be stars or lost), refused with an honest
+    // message rather than "not a known object identifier"
+    excluded: new Set((v1 ? CAT_EXCLUDED : CAT_EXCLUDED.concat(V2_EXCLUDED)).map(asWord)),
+    // the keyboard's letters: every letter of the pool's ids
+    letters: [...new Set(words.join("").replace(/[^A-Z]/g, ""))].sort(),
+  };
+}
+
+const POOLS = new Map();
+function poolFor(era, fmt) {
+  const key = era + "/" + fmt;
+  if (!POOLS.has(key)) POOLS.set(key, makePool(era, fmt));
+  return POOLS.get(key);
+}
+
+// the pool of puzzle d in format fmt, and its answer as a word
+function poolForDay(d, fmt) { return poolFor(eraOf(d, fmt), fmt); }
+function answerForDay(d, fmt = FMT_CURRENT) {
+  if (eraOf(d, fmt) === "v2") return fullWord(v2AnswerForDay(d));
+  const id = v1AnswerForDay(d);
+  return fullWord(fmt === 1 ? id : unpadId(id));
+}
+
+// the same object's id in another format of the pool's era (undefined if none)
+function idInFormat(p, id, fmt) {
+  const i = p.index.get(fullWord(id));
+  return i === undefined ? undefined : poolFor(p.era, fmt).ids[i];
+}
+
+const DAY = todayIndex();
+const ANSWER = answerForDay(DAY); // today's daily, in the current format
+
+// a word as its id ("MEL25   " -> "Mel25"); a word outside the pool as typed
+function displayName(word, p = pool) {
+  const i = p.index.get(word);
+  return i === undefined ? word.trim() : p.ids[i];
+}
+
+// "Mel25" -> "Mel 25", "NGC0042" -> "NGC 42": the id as astronomers write it
+function spacedId(id) {
+  const m = ID_RE.exec(id);
+  return m ? m[1] + " " + parseInt(m[2], 10) + m[3] : id;
+}
+
+// The identifier SIMBAD knows the object by, for the runtime hint query:
+// "NGC 42", "M 31", "Cl Melotte 25". data_v2.js lists the v2 answers where
+// that isn't the mechanical form; null = SIMBAD has no object of its own.
+function simbadQuery(word, p = pool) {
+  const id = p.ids[p.index.get(word)];
+  if (id === undefined) return null;
+  if (p.era === "v2" && Object.prototype.hasOwnProperty.call(V2_QUERY, id)) return V2_QUERY[id];
+  const [, cat, num, letter] = ID_RE.exec(id);
+  return (SIMBAD_CAT[cat] || cat) + " " + parseInt(num, 10) + letter;
+}
+
+// A minority of in-game objects have a well-known common name (curated per
+// era, see names.js / names_v2.js). Returns the name or null; used by the
+// end-of-game reveal and the sky-view caption.
+function commonName(word, p = pool) {
+  return p.names.get(word) || null;
+}
+
+// The object's other established names (aka.js, keyed by v2 answer: display
+// only, not frozen by an era), shown in the reveal beside its common name; a
+// v1 id looks them up through its object's v2 answer. Only for an object
+// that has a common name in the puzzle's era, and never repeating it.
+function otherNames(word, p = pool) {
+  const id = p.ids[p.index.get(word)], common = commonName(word, p);
+  if (id === undefined || !common || typeof ALSO_KNOWN_AS === "undefined") return [];
+  const u = unpadId(id);
+  const v2 = p.era === "v2" ? id : V2_BY_UPPER.get(u) || V2_ALIASES[u];
+  return (ALSO_KNOWN_AS[v2] || []).filter(n => n !== common);
+}
+
+/* ---- refusals: why a word that isn't in the puzzle's pool was refused ---- */
+
+// v2 ids, aliases and split aliases by their tile form ("MEL25")
+const V2_BY_UPPER = new Map(V2_IDS.map(id => [id.toUpperCase(), id]));
+const V2_ALIAS_BY_UPPER = new Map(Object.entries(V2_ALIASES).map(([a, t]) => [a.toUpperCase(), [a, t]]));
+const V2_SPLIT_BY_UPPER = new Map(Object.entries(V2_SPLIT_ALIASES).map(([a, ts]) => [a.toUpperCase(), [a, ts]]));
+
+// v2 answer -> the v1 ids (format 1) of that object, built on first use
+let v1IdsByV2 = null;
+function v1IdsOf(v2Id) {
+  if (!v1IdsByV2) {
+    v1IdsByV2 = new Map();
+    for (const id of CAT_IDENTIFIERS) {
+      const u = unpadId(id);
+      const t = V2_BY_UPPER.has(u) ? u : V2_ALIASES[u];
+      if (!t) continue;
+      if (!v1IdsByV2.has(t)) v1IdsByV2.set(t, []);
+      v1IdsByV2.get(t).push(id);
+    }
+  }
+  return v1IdsByV2.get(v2Id) || [];
+}
+
+// The message for a refused word (every refusal counts toward ✖): the same id
+// in the puzzle's format, a SIMBAD-less catalogue entry, an alias ("NGC224 is
+// M31 in Muldle"; in a v1 puzzle "M31 is NGC224 in this puzzle"), an object
+// that joined in a later era, or simply unknown.
+function refusalMessage(word, p = pool) {
+  const typed = word.trim();
+  // typed from the second tile on: the id itself may be fine
+  if (word[0] === BLANK && p.index.has(fullWord(typed))) {
+    return `Identifiers start in the first tile: ${displayName(fullWord(typed), p)}`;
+  }
+  const m = /^([A-Z]+)(\d+)([A-Z]?)$/.exec(typed);
+  if (!m) return `${typed} is not a known object identifier`;
+  const [, cat, num, letter] = m;
+  const n = String(parseInt(num, 10));
+  const key = cat + n + letter; // format 2, tile form
+  // the same number written the way this puzzle writes it (only a padding
+  // difference gets the format hint)
+  const same = fullWord(cat + (p.fmt === 1 ? n.padStart(4, "0") : n) + letter);
+  if (same !== fullWord(typed) && p.index.has(same)) {
+    return p.fmt === 1
+      ? `This puzzle was started with zero-padded ids: ${displayName(same, p)}`
+      : `Ids have no leading zeros now: ${displayName(same, p)}`;
+  }
+  if (p.excluded.has(same)) {
+    return `${same.trim()} is a real catalogue entry, but SIMBAD has no data on it — not in the game`;
+  }
+  const alias = V2_ALIAS_BY_UPPER.get(key), split = V2_SPLIT_BY_UPPER.get(key);
+  if (p.era === "v2") {
+    if (alias) return `${alias[0]} is ${alias[1]} in Muldle`;
+    if (split) return `${split[0]} is ${split[1].join(" and ")} in Muldle`;
+  } else {
+    // the v2 object(s) behind the typed id, then their ids in this puzzle
+    const named = alias ? alias[0] : split ? split[0] : V2_BY_UPPER.get(key);
+    const targets = alias ? [alias[1]] : split ? split[1] : named ? [named] : [];
+    if (targets.length) {
+      const here = targets.map(t => v1IdsOf(t).map(id => (p.fmt === 1 ? id : unpadId(id))));
+      return here.every(ids => ids.length)
+        ? `${named} is ${here.map(ids => ids.join(" or ")).join(" and ")} in this puzzle`
+        : `${named} joined Muldle after this puzzle`;
+    }
+  }
+  return `${typed} is not a known object identifier`;
 }
 
 /* ============ state ============ */
 
+// today's daily (or the random-practice object): { day, guesses, randomId, rejected, fmt }
 const STORAGE_KEY = "muldle-v1";
 // past puzzles replayed via the navigator, keyed by number:
-// { [day]: { guesses, rejected } } (older entries are a bare guesses[] array).
-// Separate from muldle-v1 so browsing an off-day puzzle never clobbers today's
-// daily progress (or the random-practice object).
+// { [day]: { guesses, rejected, fmt } } (bare guesses[] arrays before the
+// rejected count existed; stampFormats converts them). Separate from muldle-v1
+// so browsing an off-day puzzle never clobbers today's daily progress (or the
+// random-practice object).
 const ARCHIVE_KEY = "muldle-archive-v1";
 
+let pool = poolForDay(DAY, FMT_CURRENT); // the puzzle's era + format: its words,
+                           // object data and keyboard letters
 let guesses = [];          // array of padded guess strings already submitted
 let current = [];          // characters of the guess being typed, indexed by
                            // tile position (sparse: holes are empty tiles)
@@ -105,7 +350,8 @@ let rejected = 0;          // guesses refused this puzzle (unknown identifier,
 let lastRejected = null;   // the row's last refused guess: re-submitting it
                            // unchanged (held / double-tapped Enter) isn't a new try
 let finished = false;      // won or lost
-let randomId = null;       // identifier overriding the daily answer (random-object mode)
+let randomId = null;       // identifier overriding the daily answer (random-object
+                           // mode), written in the pool's format
 let answer = ANSWER;       // answer of the puzzle being played (padded)
 let viewDay = DAY;         // puzzle number in play: today's (DAY) or an archived one (< DAY)
 
@@ -143,32 +389,89 @@ function rejectedCount(v) {
   return Number.isInteger(v) && v > 0 ? v : 0;
 }
 
+// A stored entry as this code reads it. A save without `fmt` was written by
+// pre-release code (before every load stamps it, or by a stale tab since), so
+// it is format 1; a bare-array archive entry is { guesses, rejected: 0, fmt: 1 }.
+function normEntry(e) {
+  if (Array.isArray(e)) return { guesses: e, rejected: 0, fmt: 1 };
+  return e && typeof e === "object" && !("fmt" in e) ? { ...e, fmt: 1 } : e;
+}
+
+// Writes normEntry's reading back to every store on load, so the saves carry
+// their flag. Idempotent; the readers apply the same rule, so a failed write
+// (or a stale tab writing an unflagged entry later) changes nothing. A present
+// but unknown fmt is left alone (see foreignEntry).
+function stampFormats() {
+  const update = (key, fn) => {
+    try {
+      const raw = localStorage.getItem(key);
+      const v = JSON.parse(raw);
+      if (!v || typeof v !== "object") return;
+      const out = JSON.stringify(fn(v));
+      if (out !== raw) localStorage.setItem(key, out);
+    } catch (e) { /* corrupt or full: the readers normalise anyway */ }
+  };
+  update(STORAGE_KEY, normEntry);
+  for (const key of [ARCHIVE_KEY, RESULTS_KEY]) {
+    update(key, store => {
+      for (const k of Object.keys(store)) store[k] = normEntry(store[k]);
+      return store;
+    });
+  }
+}
+
+// a stored entry of puzzle `day` this code must leave alone: its fmt isn't one
+// ID_FORMATS knows for the era it was played in (newer code wrote it, or it's
+// corrupt)
+function foreignEntry(e, day) {
+  e = normEntry(e);
+  return !!e && typeof e === "object" && !knownFormat(e.fmt, eraOf(day, e.fmt));
+}
+
+// a stored { guesses, rejected, fmt } entry of puzzle `day`, sanitised, or null
+// if there's none or it's foreign. With no guess saved there is nothing to keep
+// in an older format, so such a puzzle plays (and saves) in the current one.
+function readEntry(e, day) {
+  e = normEntry(e);
+  if (!e || typeof e !== "object" || !Array.isArray(e.guesses) || foreignEntry(e, day)) return null;
+  const gs = e.guesses.filter(g => typeof g === "string" && g.length === WORD_LEN);
+  return { guesses: gs, rejected: rejectedCount(e.rejected), fmt: gs.length ? e.fmt : FMT_CURRENT };
+}
+
 // today's daily (and the random-practice object) live in muldle-v1, keyed on
 // DAY; an off-day puzzle browsed via the navigator goes to the archive store so
-// it never overwrites today's daily.
+// it never overwrites today's daily. Neither overwrites a foreign entry.
 function saveState() {
+  const entry = { guesses, rejected, fmt: pool.fmt };
   if (randomId || viewDay === DAY) {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ day: DAY, guesses, randomId, rejected }));
+    if (foreignEntry(loadToday(), DAY)) return;
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ day: DAY, ...entry, randomId }));
   } else {
     const a = loadArchive();
-    a[viewDay] = { guesses, rejected };
+    if (foreignEntry(a[viewDay], viewDay)) return;
+    a[viewDay] = entry;
     localStorage.setItem(ARCHIVE_KEY, JSON.stringify(a));
   }
 }
 
-function loadState() {
+// muldle-v1's entry if it is today's, else null
+function loadToday() {
   try {
     const s = JSON.parse(localStorage.getItem(STORAGE_KEY));
-    if (s && s.day === DAY && Array.isArray(s.guesses)) {
-      return {
-        guesses: s.guesses.filter(g => typeof g === "string" && g.length === WORD_LEN),
-        randomId: typeof s.randomId === "string" &&
-          ALLOWED.has(fullWord(s.randomId)) ? s.randomId : null,
-        rejected: rejectedCount(s.rejected),
-      };
-    }
-  } catch (e) { /* corrupt state: start fresh */ }
-  return { guesses: [], randomId: null, rejected: 0 };
+    return s && s.day === DAY ? s : null;
+  } catch (e) { return null; }
+}
+
+function loadState() {
+  const s = normEntry(loadToday());
+  const e = readEntry(s, DAY);
+  if (e) {
+    if (typeof s.randomId !== "string") return { ...e, randomId: null };
+    // the random object moves to the current format with its guesses (none)
+    const rid = idInFormat(poolForDay(DAY, s.fmt), s.randomId, e.fmt);
+    if (rid) return { ...e, randomId: rid };
+  }
+  return { guesses: [], randomId: null, rejected: 0, fmt: FMT_CURRENT };
 }
 
 function loadArchive() {
@@ -178,32 +481,24 @@ function loadArchive() {
   } catch (e) { return {}; }
 }
 
-// saved { guesses, rejected } for the puzzle currently in view: today's daily
-// from muldle-v1 (unless a random save sits there, in which case today's daily
-// is fresh), an off-day puzzle from the archive store, or — for a past daily
-// you played live but never replayed in the archive — the persistent results store
+// saved { guesses, rejected, fmt } for the puzzle currently in view: today's
+// daily from muldle-v1 (unless a random save sits there, in which case today's
+// daily is fresh), an off-day puzzle from the archive store, or — for a past
+// daily you played live but never replayed in the archive — the persistent
+// results store
 function loadViewState() {
+  const fresh = { guesses: [], rejected: 0, fmt: FMT_CURRENT };
   if (viewDay === DAY) {
     const s = loadState();
-    return s.randomId ? { guesses: [], rejected: 0 } : { guesses: s.guesses, rejected: s.rejected };
+    return s.randomId ? fresh : { guesses: s.guesses, rejected: s.rejected, fmt: s.fmt };
   }
-  const valid = g => typeof g === "string" && g.length === WORD_LEN;
-  const e = loadArchive()[viewDay];
-  // archive entries were bare guess arrays before the rejected count existed
-  if (Array.isArray(e)) return { guesses: e.filter(valid), rejected: 0 };
-  if (e && Array.isArray(e.guesses)) {
-    return { guesses: e.guesses.filter(valid), rejected: rejectedCount(e.rejected) };
-  }
-  const rec = loadResults()[viewDay];
-  return rec && Array.isArray(rec.guesses)
-    ? { guesses: rec.guesses.filter(valid), rejected: rejectedCount(rec.rejected) }
-    : { guesses: [], rejected: 0 };
+  return readEntry(loadArchive()[viewDay], viewDay) || readEntry(loadResults()[viewDay], viewDay) || fresh;
 }
 
 /* ============ local play history + stats (no backend) ============ */
 
 // Persistent per-mode results, keyed by puzzle number:
-//   { [day]: { guesses, solved, tries, playedOnDay, rejected } }.
+//   { [day]: { guesses, solved, tries, playedOnDay, rejected, fmt } }.
 // This is the ONLY store that outlives a day rollover — muldle-v1 is keyed on
 // today's DAY and discarded once the day turns, so a finished daily is recorded
 // here at finish time (and migrated from a stale muldle-v1 on load). Everything
@@ -224,9 +519,10 @@ function saveResults(store) {
 // Record one finished puzzle. A live-daily record (playedOnDay) is canonical and
 // permanent: it is written once and never overwritten — not by a later archive
 // replay, nor by a reset-and-replay — so daily history and streaks stay stable.
+// A foreign record (see foreignEntry) is never overwritten either.
 function recordResult(day, entry) {
   const store = loadResults();
-  if (store[day] && store[day].playedOnDay) return;
+  if (store[day] && (store[day].playedOnDay || foreignEntry(store[day], day))) return;
   store[day] = entry;
   saveResults(store);
 }
@@ -241,6 +537,7 @@ function recordCurrentResult(solved) {
     tries: solved ? guesses.length : null,
     playedOnDay: viewDay === DAY,
     rejected,
+    fmt: pool.fmt,
   });
 }
 
@@ -266,16 +563,15 @@ function pruneFutureEntries(key) {
 function migrateStaleDaily() {
   try {
     const s = JSON.parse(localStorage.getItem(STORAGE_KEY));
-    if (!s || typeof s.day !== "number" || s.day >= DAY || s.randomId) return;
-    if (!Array.isArray(s.guesses)) return;
-    const gs = s.guesses.filter(g => typeof g === "string" && g.length === WORD_LEN);
-    if (!gs.length) return;
-    const ans = answerForDay(s.day);
-    const solved = gs[gs.length - 1] === ans;
+    if (!s || !Number.isInteger(s.day) || s.day < 0 || s.day >= DAY || s.randomId) return;
+    const e = readEntry(s, s.day);
+    if (!e || !e.guesses.length) return;
+    const gs = e.guesses;
+    const solved = gs[gs.length - 1] === answerForDay(s.day, e.fmt);
     if (!solved && gs.length < MAX_GUESSES) return; // unfinished — not a result
     recordResult(s.day, {
       guesses: gs, solved, tries: solved ? gs.length : null, playedOnDay: true,
-      rejected: rejectedCount(s.rejected),
+      rejected: e.rejected, fmt: e.fmt,
     });
   } catch (e) { /* corrupt: nothing to migrate */ }
 }
@@ -384,22 +680,25 @@ function hardModeViolation(prevGuesses, answer, guess) {
   return hintMessage(MuldleHints.violation(revealedHints(prevGuesses, answer), guess));
 }
 
-// How many identifiers hard mode would accept as the next guess: every allowed
-// one that could still be the answer (never an earlier guess). Shown in the
-// info line, as lettered answers can leave only a handful (2 of 12001 is not
-// unusual). The hints are built once, not once per candidate.
-function legalGuessCount(prevGuesses, answer) {
+// How many identifiers hard mode would accept as the next guess: every one in
+// the puzzle's pool that could still be the answer (never an earlier guess,
+// never an alias). Shown in the info line, as lettered answers can leave only a
+// handful (2 of 12001 is not unusual). The hints are built once, not once per
+// candidate.
+function legalGuessCount(prevGuesses, answer, p = pool) {
   const hints = revealedHints(prevGuesses, answer);
   let n = 0;
-  for (const w of ALLOWED) if (!MuldleHints.violation(hints, w)) n++;
+  for (const w of p.words) if (!MuldleHints.violation(hints, w)) n++;
   return n;
 }
 
 /* ============ object-property hints (pure helpers) ============ */
 
-// padded playable word "NGC1023A" / "IC0434  " -> index into the data arrays
-function catalogueIndex(word) {
-  return CAT_IDENTIFIERS.indexOf(word.trim());
+// padded playable word "NGC1023A" / "MEL25   " -> index into the pool's data
+// arrays (-1 if the word isn't in the pool)
+function catalogueIndex(word, p = pool) {
+  const i = p.index.get(word);
+  return i === undefined ? -1 : i;
 }
 
 const DEG = Math.PI / 180;
@@ -467,15 +766,6 @@ const CONSTELLATION_NAMES = {
   Vul: "Vulpecula",
 };
 
-// catalogue id -> common name (from names.js, if the object has one) so the
-// reveal caption/message can name e.g. NGC 6543 the "Cat's Eye Nebula". Built
-// from ID_NAMES (every id, not ABC_NAMES's deduped representatives) so answers
-// that share a name — NGC0651, NGC0884, … — are named too.
-const NAME_BY_ID = new Map();
-for (const e of (typeof ID_NAMES !== "undefined" ? ID_NAMES : [])) {
-  if (!NAME_BY_ID.has(e.id)) NAME_BY_ID.set(e.id, e.name);
-}
-
 /* ============ DOM setup ============ */
 
 const boardEl = document.getElementById("board");
@@ -523,6 +813,13 @@ const muldle = (window.__muldle = window.__muldle || {});
 muldle.today = muldle.today || {};
 muldle.today.id = DAY;
 muldle.view = muldle.view || { id: DAY, abc: DAY };
+// whether the puzzle in play has a guess yet (start.js shows its start screen
+// only for a fresh one); abc.js sets .abc
+// (random practice counts as started: it isn't a fresh daily). Also whether
+// the page was opened with a ?p=N link, read before any syncUrl drops it.
+muldle.started = muldle.started || {};
+muldle.started.id = () => guesses.length > 0 || !!randomId;
+muldle.linked = new URLSearchParams(location.search).has("p");
 muldle.syncUrl = function () {
   try {
     const m = window.__muldleMode || activeModeOnLoad();
@@ -581,16 +878,29 @@ function buildHintPanel() {
   }
 }
 
-const KEY_ROWS = [
-  ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"],
-  [...LETTER_KEYS],
-  ["Enter", "Back"],
-];
+// digits, the pool's letters (v1: NGC/IC + component letters A-F; v2 adds L,
+// M and R), Enter + Back. More than 10 letters split into two rows, with
+// Enter and Back around the second, so the keys keep their size and the
+// keyboard its three rows on a phone (.split in style.css).
+function keyRows(letters) {
+  const digits = [..."1234567890"];
+  if (letters.length <= 10) return [digits, letters, ["Enter", "Back"]];
+  const half = Math.ceil(letters.length / 2);
+  return [digits, letters.slice(0, half), ["Enter", ...letters.slice(half), "Back"]];
+}
 
-const keyEls = {};
+let keyEls = {};
+let keyLetters = ""; // the letters the keyboard was built for
 
+// (re)build the keyboard for the pool in play; a no-op while its letters stay
+// the same, so key colours survive (the navigator crossing an era rebuilds it)
 function buildKeyboard() {
-  for (const rowKeys of KEY_ROWS) {
+  if (keyLetters === pool.letters.join("")) return;
+  keyLetters = pool.letters.join("");
+  keyboardEl.replaceChildren();
+  keyboardEl.classList.toggle("split", pool.letters.length > 10);
+  keyEls = {};
+  for (const rowKeys of keyRows(pool.letters)) {
     const row = document.createElement("div");
     row.className = "krow";
     for (const k of rowKeys) {
@@ -630,7 +940,7 @@ function renderCurrentRow() {
 function renderGuessRow(r, guess) {
   const rowEl = boardEl.children[r];
   rowEl.classList.add("guessed");
-  rowEl.title = "Show " + simbadIdent(guess.trim()) + " in the sky view";
+  rowEl.title = "Show " + spacedId(displayName(guess)) + " in the sky view";
   const score = scoreGuess(guess, answer);
   for (let c = 0; c < WORD_LEN; c++) {
     const t = tiles[r][c];
@@ -654,7 +964,7 @@ function upgradeKey(key, status) {
 
 let messageTimer = null;
 
-function showMessage(text, sticky = false, alsoKnownAs = null) {
+function showMessage(text, sticky = false, alsoKnownAs = null, others = []) {
   messageEl.textContent = text;
   if (alsoKnownAs) {
     // reveal a curated common name in italics: "… It was NGC5194. Also known
@@ -665,11 +975,22 @@ function showMessage(text, sticky = false, alsoKnownAs = null) {
     em.textContent = alsoKnownAs;
     messageEl.append(em, ".");
   }
+  appendOtherNames(messageEl, others);
   messageEl.classList.toggle("reveal", sticky);
   clearTimeout(messageTimer);
   if (!sticky && text) {
     messageTimer = setTimeout(() => { messageEl.textContent = ""; }, 2500);
   }
+}
+
+// "Other names: Swan Nebula, Checkmark Nebula." as a quieter second line of
+// a reveal (both modes; abc.js calls this too)
+function appendOtherNames(el, others) {
+  if (!others || !others.length) return;
+  const line = document.createElement("span");
+  line.className = "other-names";
+  line.textContent = `Other names: ${others.join(", ")}.`;
+  el.append(line);
 }
 
 function shakeCurrentRow() {
@@ -690,15 +1011,9 @@ const captionEl = document.getElementById("object-caption");
 const aladinDiv = document.getElementById("aladin-lite-div");
 const surveyPickerEl = document.getElementById("survey-picker");
 
-let shownId = null;    // catalogue id currently in the object panel, or null
+let shownId = null;    // word of the object in the panel ("NGC0042 "), or null
 let aladinView = null; // Aladin Lite instance, reused when switching objects
 let surveyCtl = null;  // survey picker controller (surveys.js), built on first show
-
-// "NGC0042" -> "NGC 42", "IC1023A" -> "IC 1023A"
-function simbadIdent(id) {
-  const [, prefix, num, letter] = ID_RE.exec(id);
-  return prefix + " " + parseInt(num, 10) + letter;
-}
 
 let aladinReady = null; // load the script only once per page life
 
@@ -718,18 +1033,20 @@ function loadAladin() {
 // Object type, angular size (-> field of view, SIMBAD-style: 2x major axis)
 // and magnitude (V, else B). Cached per identifier; a failed fetch is not
 // cached so a later guess retries. `found` distinguishes an object SIMBAD
-// doesn't know (false — ~12% of Corwin's identifiers, mostly IC entries
-// that turned out to be stars/lost) from a failed fetch (null).
+// doesn't know (false: a null ident, i.e. a v2 answer with no SIMBAD object of
+// its own, or an id SIMBAD doesn't resolve) from a failed fetch (null).
 const objectInfoCache = new Map();
+const NOT_IN_SIMBAD = { found: false, fov: DEFAULT_FOV, otype: "", mag: null, band: "", typeDesc: "" };
 
 function fetchObjectInfo(ident) {
+  if (ident === null) return Promise.resolve(NOT_IN_SIMBAD);
   if (objectInfoCache.has(ident)) return objectInfoCache.get(ident);
   const q = "SELECT basic.otype_txt, basic.galdim_majaxis, allfluxes.V, allfluxes.B, " +
     "otypedef.description " +
     "FROM ident JOIN basic ON ident.oidref = basic.oid " +
     "LEFT JOIN allfluxes ON allfluxes.oidref = basic.oid " +
     "LEFT JOIN otypedef ON otypedef.otype = basic.otype " +
-    "WHERE ident.id = '" + ident + "'";
+    "WHERE ident.id = '" + ident.replace(/'/g, "''") + "'";
   const url = SIMBAD_TAP + "?request=doQuery&lang=adql&format=json&query=" +
     encodeURIComponent(q);
   const p = fetch(url)
@@ -779,11 +1096,11 @@ function setHintSpinner(ref) {
 function renderHintRow(r, guess) {
   const gi = catalogueIndex(guess), ai = catalogueIndex(answer);
   const cells = hintCells[r];
-  const gPos = CAT_POSITIONS[gi], aPos = CAT_POSITIONS[ai];
+  const gPos = pool.positions[gi], aPos = pool.positions[ai];
 
-  const gCon = CAT_CONSTELLATIONS[gi];
+  const gCon = pool.constellations[gi];
   setHint(cells.con, CONSTELLATION_NAMES[gCon] || gCon,
-    gCon === CAT_CONSTELLATIONS[ai] ? "match" : "");
+    gCon === pool.constellations[ai] ? "match" : "");
 
   const sep = angularSeparation(gPos, aPos);
   const arrow = gi === ai ? "●" : DIR_ARROWS[compassDir(positionAngle(gPos, aPos))];
@@ -793,9 +1110,7 @@ function renderHintRow(r, guess) {
   setHintSpinner(cells.type);
   setHintSpinner(cells.mag);
   const gen = puzzleGen;
-  const gId = guess.trim();
-  const aId = answer.trim();
-  Promise.all([fetchObjectInfo(simbadIdent(gId)), fetchObjectInfo(simbadIdent(aId))])
+  Promise.all([fetchObjectInfo(simbadQuery(guess)), fetchObjectInfo(simbadQuery(answer))])
     .then(([g, a]) => {
       if (gen !== puzzleGen) return; // puzzle was reset meanwhile
       setHint(cells.type, g.otype || (g.found === false ? "n/a" : "?"),
@@ -837,22 +1152,22 @@ function hideObjectPanel() {
 function markShownRow() {
   for (let r = 0; r < MAX_GUESSES; r++) {
     boardEl.children[r].classList.toggle("viewing",
-      r < guesses.length && guesses[r].trim() === shownId);
+      r < guesses.length && guesses[r] === shownId);
   }
 }
 
-function renderCaption(id, ident, otype, found) {
-  const isTarget = fullWord(id) === answer;
+function renderCaption(word, ident, otype, found) {
+  const isTarget = word === answer;
+  const idx = catalogueIndex(word);
   const role = document.createElement("span");
   role.className = "object-role" + (isTarget ? " target" : "");
   role.textContent = isTarget ? "target" : "guess";
   const link = document.createElement("a");
-  if (found === false) {
-    // SIMBAD has no entry for this identifier (mostly IC entries that turned
-    // out to be stars/lost) — link a coordinate search at Corwin's position
-    // instead of a dead sim-basic page
-    const idx = catalogueIndex(fullWord(id));
-    const [ra, dec] = CAT_POSITIONS[idx];
+  if (found === false || ident === null) {
+    // SIMBAD has no object of its own for this id (a v1 IC entry that turned
+    // out to be a star, or a v2 answer SIMBAD merged away) — link a coordinate
+    // search at the catalogue position instead of a dead sim-basic page
+    const [ra, dec] = pool.positions[idx];
     link.href = "https://simbad.cds.unistra.fr/simbad/sim-coo?Coord=" +
       encodeURIComponent(`${ra} ${dec >= 0 ? "+" : ""}${dec}`) +
       "&Radius=2&Radius.unit=arcmin";
@@ -863,15 +1178,14 @@ function renderCaption(id, ident, otype, found) {
   }
   link.target = "_blank";
   link.rel = "noopener";
-  link.textContent = ident;
+  link.textContent = spacedId(displayName(word));
   captionEl.replaceChildren(role, " ", link);
   // common name (if the object has one) and constellation, alongside the type
-  const common = NAME_BY_ID.get(id);
+  const common = commonName(word);
   if (common) captionEl.append(" · " + common);
   if (otype) captionEl.append(" · " + otype);
   else if (found === false) captionEl.append(" · not in SIMBAD");
-  const idx = CAT_IDENTIFIERS.indexOf(id);
-  const con = idx >= 0 ? CAT_CONSTELLATIONS[idx] : "";
+  const con = idx >= 0 ? pool.constellations[idx] : "";
   if (con) captionEl.append(" · " + (CONSTELLATION_NAMES[con] || con));
   if (finished && !isTarget) {
     const back = document.createElement("a");
@@ -879,17 +1193,17 @@ function renderCaption(id, ident, otype, found) {
     back.textContent = "show target";
     back.addEventListener("click", (e) => {
       e.preventDefault();
-      showObject(answer.trim());
+      showObject(answer);
     });
     captionEl.append(" · ", back);
   }
 }
 
-// Show a catalogue object (id like "NGC1023A") in the panel right of the
-// board: the answer when the game ends, or any clicked guess row.
-function showObject(id) {
-  if (shownId === id) return;
-  shownId = id;
+// Show a catalogue object (a word of the pool, like "NGC1023A") in the panel
+// right of the board: the answer when the game ends, or any clicked guess row.
+function showObject(word) {
+  if (shownId === word) return;
+  shownId = word;
   markShownRow();
 
   if (panelEl.hidden) {
@@ -909,11 +1223,11 @@ function showObject(id) {
     }
   }
 
-  const ident = simbadIdent(id);
-  const idx = CAT_IDENTIFIERS.indexOf(id);
-  const pos = idx >= 0 ? CAT_POSITIONS[idx] : null;
+  const ident = simbadQuery(word);
+  const idx = catalogueIndex(word);
+  const pos = idx >= 0 ? pool.positions[idx] : null;
 
-  renderCaption(id, ident, "");
+  renderCaption(word, ident, "");
 
   if (!pos) return;
   // spinner in the caption while the object's SIMBAD data is on its way
@@ -924,7 +1238,7 @@ function showObject(id) {
   Promise.all([loadAladin(), fetchObjectInfo(ident)])
     .then(([, info]) => {
       // skip if the puzzle was reset or another object was clicked meanwhile
-      if (gen !== puzzleGen || shownId !== id) return;
+      if (gen !== puzzleGen || shownId !== word) return;
       if (aladinView) {
         aladinView.gotoRaDec(pos[0], pos[1]);
         aladinView.setFov(info.fov);
@@ -944,10 +1258,10 @@ function showObject(id) {
         surveyCtl.apply(aladinView);
         window.MuldleSurveys.updateCoverage(surveyCtl, pos[0], pos[1]);
       }
-      renderCaption(id, ident, info.otype, info.found);
+      renderCaption(word, ident, info.otype, info.found);
     })
     .catch(() => {
-      if (gen !== puzzleGen || shownId !== id) return;
+      if (gen !== puzzleGen || shownId !== word) return;
       spinner.remove();
       aladinDiv.textContent = "sky view unavailable";
       aladinDiv.style.display = "flex";
@@ -960,13 +1274,13 @@ function showObject(id) {
 // switches back to the target (game over) or closes the panel (mid-game)
 function rowClicked(r) {
   if (r >= guesses.length) return;
-  const id = guesses[r].trim();
-  if (id !== shownId) {
-    showObject(id);
+  const word = guesses[r];
+  if (word !== shownId) {
+    showObject(word);
     // on stacked (phone) layouts the panel lives below the keyboard
     panelEl.scrollIntoView({ behavior: "smooth", block: "nearest" });
   } else if (finished) {
-    showObject(answer.trim());
+    showObject(answer);
   } else {
     hideObjectPanel();
   }
@@ -1040,10 +1354,8 @@ function submitGuess() {
   // tiles left empty count as blanks, e.g. "NGC0042" -> "NGC0042 "
   let guess = "";
   for (let i = 0; i < WORD_LEN; i++) guess += current[i] ?? BLANK;
-  if (!ALLOWED.has(guess)) {
-    showMessage(EXCLUDED.has(guess)
-      ? `${displayName(guess)} is a real catalogue entry, but SIMBAD has no data on it — not in the game`
-      : `${displayName(guess)} is not a known object identifier`);
+  if (!pool.index.has(guess)) {
+    showMessage(refusalMessage(guess));
     rejectGuess(guess);
     return;
   }
@@ -1070,14 +1382,14 @@ function submitGuess() {
   if (guess === answer) {
     finished = true;
     recordCurrentResult(true);
-    showMessage(`${WIN_MESSAGES[guesses.length - 1]} It was ${displayName(answer)}.`, true, commonName(answer));
-    showObject(answer.trim());
+    showMessage(`${WIN_MESSAGES[guesses.length - 1]} It was ${displayName(answer)}.`, true, commonName(answer), otherNames(answer));
+    showObject(answer);
     showPostGame();
   } else if (guesses.length >= MAX_GUESSES) {
     finished = true;
     recordCurrentResult(false);
-    showMessage(`Out of guesses — it was ${displayName(answer)}.`, true, commonName(answer));
-    showObject(answer.trim());
+    showMessage(`Out of guesses — it was ${displayName(answer)}.`, true, commonName(answer), otherNames(answer));
+    showObject(answer);
     showPostGame();
   }
   updateInfo();            // fewer identifiers stay legal with every new hint
@@ -1123,21 +1435,29 @@ const settingsBtn = document.getElementById("settings-button");
 const settingsDialog = document.getElementById("settings-dialog");
 const backToDailyBtn = document.getElementById("back-to-daily");
 const hardModeToggle = document.getElementById("hard-mode-toggle");
+const byCatalogueRow = document.getElementById("by-catalogue-row");
+const byCatalogueToggle = document.getElementById("by-catalogue-toggle");
 
 // preferences survive across days, unlike the per-day game state
 const SETTINGS_KEY = "muldle-settings-v1";
-let hardMode = true; // default on
+let hardMode = true;      // default on
+let byCatalogue = false;  // random practice: each catalogue equally likely (ID only)
 
 function loadSettings() {
   try {
     const s = JSON.parse(localStorage.getItem(SETTINGS_KEY));
     if (s && typeof s.hardMode === "boolean") hardMode = s.hardMode;
+    if (s && typeof s.byCatalogue === "boolean") byCatalogue = s.byCatalogue;
   } catch (e) { /* corrupt settings: keep defaults */ }
+}
+
+function saveSettings() {
+  try { localStorage.setItem(SETTINGS_KEY, JSON.stringify({ hardMode, byCatalogue })); } catch (e) { /* ignore */ }
 }
 
 hardModeToggle.addEventListener("change", () => {
   hardMode = hardModeToggle.checked;
-  localStorage.setItem(SETTINGS_KEY, JSON.stringify({ hardMode }));
+  saveSettings();
   // re-derive the prefill for the row being typed (on: lock known greens,
   // off: free all tiles); partial input is discarded to avoid collisions
   resetCurrentRow();
@@ -1145,11 +1465,16 @@ hardModeToggle.addEventListener("change", () => {
   updateInfo(); // the legal-guess count only applies in hard mode
 });
 
+byCatalogueToggle.addEventListener("change", () => {
+  byCatalogue = byCatalogueToggle.checked;
+  saveSettings();
+});
+
 // legalGuessCount scans all identifiers, so remember the last result; it only
 // changes when the puzzle or its guesses do
 let legalMemo = { key: null, n: 0 };
 function legalCountNow() {
-  const key = answer + "|" + guesses.join("|");
+  const key = pool.era + pool.fmt + "|" + answer + "|" + guesses.join("|");
   if (legalMemo.key !== key) legalMemo = { key, n: legalGuessCount(guesses, answer) };
   return legalMemo.n;
 }
@@ -1159,16 +1484,16 @@ function updateInfo() {
   // context (random / archive), the pool size — or, mid-game in hard mode, how
   // many identifiers are still legal — and the rejected-guess count
   const ctx = randomId ? "Random object · " : viewDay !== DAY ? "Archive · " : "";
-  let pool = `${N} identifiers in play`;
+  let size = `${pool.words.length} identifiers in play`;
   if (hardMode && !finished && guesses.length) {
     const n = legalCountNow();
-    pool = `${n} legal identifier${n === 1 ? "" : "s"} left`;
+    size = `${n} legal identifier${n === 1 ? "" : "s"} left`;
   }
-  infoEl.replaceChildren(ctx + pool);
+  infoEl.replaceChildren(ctx + size);
   if (rejected) {
     const rej = document.createElement("span");
     rej.className = "rejected-count";
-    rej.title = "Rejected guesses this puzzle (unknown identifier, a repeat or a hard-mode break)";
+    rej.title = "Rejected guesses this puzzle (unknown identifier, another id of an object in the game, a repeat or a hard-mode break)";
     rej.textContent = `✖ ${rejected}`;
     infoEl.append(" · ", rej);
   }
@@ -1200,27 +1525,37 @@ function clearBoardUI() {
   }
 }
 
+// A random object of today's era for practice, never the current answer. Off:
+// any object of the pool. byCatalogue: one of the era's catalogues first (each
+// equally likely), then any object that is a member of it, shown under its
+// best-known id (so a Caldwell draw is often shown as NGC).
 function randomIdentifier() {
+  const p = poolForDay(DAY, FMT_CURRENT);
+  const pick = list => list[Math.floor(Math.random() * list.length)];
+  const cats = Object.keys(p.members);
   let id;
   do {
-    id = CAT_IDENTIFIERS[Math.floor(Math.random() * CAT_IDENTIFIERS.length)];
+    id = p.ids[byCatalogue ? pick(p.members[pick(cats)]) : Math.floor(Math.random() * p.ids.length)];
   } while (fullWord(id) === answer);
   return id;
 }
 
-// wipe the current puzzle's guesses and replay it fresh. Keeps the puzzle in
-// play (random object, today's daily, or an archived one via viewDay).
+// wipe the current puzzle's guesses and replay it fresh, in the current
+// format. Keeps the puzzle in play (random object, today's daily, or an
+// archived one via viewDay); newRandomId is in the current format.
 function startPuzzle(newRandomId, msg) {
   randomId = newRandomId;
   // a random object has no puzzle number: snap back to today's slot so the URL
   // drops any archived ?p (otherwise a reload would re-enter the archive and
   // discard the random object that was just saved to muldle-v1)
   if (randomId) viewDay = DAY;
+  pool = poolForDay(viewDay, FMT_CURRENT);
   answer = randomId ? fullWord(randomId) : answerForDay(viewDay);
   guesses = [];
   rejected = 0;
   finished = false;
   resetCurrentRow(); // no guesses yet, so no prefill — just clears the row
+  buildKeyboard();
   clearBoardUI();
   renderCurrentRow(); // show the cursor on the fresh row
   hideObjectPanel();
@@ -1243,18 +1578,24 @@ function renderPuzzleState() {
   if (guesses.length && guesses[guesses.length - 1] === answer) {
     finished = true;
     recordCurrentResult(true);
-    showMessage(`Already solved — it was ${displayName(answer)}.`, true, commonName(answer));
-    showObject(answer.trim());
+    showMessage(`Already solved — it was ${displayName(answer)}.`, true, commonName(answer), otherNames(answer));
+    showObject(answer);
     showPostGame();
   } else if (guesses.length >= MAX_GUESSES) {
     finished = true;
     recordCurrentResult(false);
-    showMessage(`Out of guesses — it was ${displayName(answer)}.`, true, commonName(answer));
-    showObject(answer.trim());
+    showMessage(`Out of guesses — it was ${displayName(answer)}.`, true, commonName(answer), otherNames(answer));
+    showObject(answer);
     showPostGame();
   }
   resetCurrentRow();
   renderCurrentRow();
+}
+
+// take over a loaded { guesses, rejected, fmt } of the puzzle in view (viewDay)
+function setPuzzle(s) {
+  ({ guesses, rejected } = s);
+  pool = poolForDay(viewDay, s.fmt);
 }
 
 // switch to puzzle <day> (today's daily or an archived one), loading its saved
@@ -1263,8 +1604,9 @@ function goToPuzzle(day) {
   day = Math.max(0, Math.min(DAY, day | 0));
   randomId = null;
   viewDay = day;
-  answer = answerForDay(day);
-  ({ guesses, rejected } = loadViewState());
+  setPuzzle(loadViewState());
+  answer = answerForDay(day, pool.fmt);
+  buildKeyboard(); // a puzzle of another era brings its own letters
   clearBoardUI();
   hideObjectPanel();
   hidePostGame();
@@ -1281,6 +1623,7 @@ function goToPuzzle(day) {
 
 settingsBtn.addEventListener("click", () => {
   backToDailyBtn.hidden = !randomId;
+  byCatalogueRow.hidden = false; // ID mode only (abc.js hides it)
   settingsDialog.showModal();
 });
 // <dialog> refocuses the opener on close; blur it so Enter/space for the next
@@ -1289,7 +1632,8 @@ settingsBtn.addEventListener("click", () => {
 settingsDialog.addEventListener("close", () => setTimeout(() => settingsBtn.blur(), 0));
 document.getElementById("settings-close").addEventListener("click", () => settingsDialog.close());
 document.getElementById("reset-puzzle").addEventListener("click", () =>
-  startPuzzle(randomId, "Puzzle reset — same object, fresh guesses."));
+  startPuzzle(randomId && idInFormat(pool, randomId, FMT_CURRENT),
+    "Puzzle reset — same object, fresh guesses."));
 document.getElementById("reset-random").addEventListener("click", () =>
   startPuzzle(randomIdentifier(), "Random object loaded — this is not today's puzzle."));
 backToDailyBtn.addEventListener("click", () => goToPuzzle(DAY));
@@ -1500,9 +1844,10 @@ function hidePostGame() {
 
 buildBoard();
 buildHintPanel();
-buildKeyboard();
 loadSettings();
 hardModeToggle.checked = hardMode;
+byCatalogueToggle.checked = byCatalogue;
+stampFormats();      // every save gets its fmt before anything reads it
 pruneFutureEntries(RESULTS_KEY);  // drop stale entries for impossible future numbers
 pruneFutureEntries(ARCHIVE_KEY);
 migrateStaleDaily(); // rescue a finished daily from a past day before it's lost
@@ -1512,16 +1857,16 @@ migrateStaleDaily(); // rescue a finished daily from a past day before it's lost
 const urlDay = readUrlDay();
 if (urlDay != null && urlDay !== DAY && activeModeOnLoad() === "id") {
   viewDay = urlDay;
-  answer = answerForDay(viewDay);
-  ({ guesses, rejected } = loadViewState());
+  setPuzzle(loadViewState());
+  answer = answerForDay(viewDay, pool.fmt);
 } else {
   const loaded = loadState();
-  guesses = loaded.guesses;
+  setPuzzle(loaded);
   randomId = loaded.randomId;
-  rejected = loaded.rejected;
-  answer = randomId ? fullWord(randomId) : ANSWER;
+  answer = randomId ? fullWord(randomId) : answerForDay(DAY, pool.fmt);
 }
 muldle.view.id = viewDay;
+buildKeyboard();
 updateNav();
 renderPuzzleState(); // replays rows, restores finished state, prefills the current row
 updateInfo();        // after renderPuzzleState: the info line depends on `finished`
