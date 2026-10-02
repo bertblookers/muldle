@@ -57,37 +57,37 @@ function scoreGuess(guess, answer) {
   return result;
 }
 
+// Orders the keyboard colours only (display). Hard mode's rules come from the
+// per-tile, per-character knowledge in hints.js, shared with ID mode.
 const KEY_RANK = { absent: 0, present: 1, correct: 2 };
 
-// hard mode: greens stay, yellows must be reused, greys are banned. Fixed
-// punctuation always matches, so it never trips these.
-function hardModeViolation(prevGuesses, answer, guess) {
-  const rank = {};
-  for (const prev of prevGuesses) {
-    const score = scoreGuess(prev, answer);
-    for (let i = 0; i < answer.length; i++) {
-      if (score[i] === "correct" && guess[i] !== prev[i])
-        return `Hard mode: keep ${prev[i]} in place`;
-    }
-    for (let i = 0; i < answer.length; i++) {
-      if (score[i] !== "present") continue;
-      // a yellow char must be reused somewhere...
-      if (!guess.includes(prev[i]))
-        return `Hard mode: name must contain ${prev[i]}`;
-      // ...but not back in the same tile — a yellow at i means "in the name,
-      // but not at position i" (holds even with repeated letters)
-      if (guess[i] === prev[i])
-        return `Hard mode: ${prev[i]} is not in that spot`;
-    }
-    for (let i = 0; i < answer.length; i++) {
-      const r = KEY_RANK[score[i]];
-      if (!(prev[i] in rank) || r > rank[prev[i]]) rank[prev[i]] = r;
-    }
-  }
-  for (const ch of guess) {
-    if (rank[ch] === 0) return `Hard mode: there is no ${ch} in the name`;
+// what the previous guesses revealed (see hints.js). Fixed punctuation is
+// always green, so it never trips a rule.
+function revealedHints(prevGuesses, answer) {
+  return MuldleHints.fromGuesses(prevGuesses, answer, scoreGuess);
+}
+
+// a hints.js violation in ABC-mode words (null stays null)
+function hintMessage(v) {
+  if (!v) return null;
+  const times = n => (n === 2 ? "twice" : `${n} times`);
+  switch (v.code) {
+    case "fixed": return `Hard mode: keep ${v.ch} in place`;
+    case "absent": return `Hard mode: there is no ${v.ch} in the name`;
+    case "not-here": return `Hard mode: ${v.ch} is not in that spot`;
+    case "too-many": return v.n === 1 ? `Hard mode: there is only one ${v.ch} in the name`
+      : `Hard mode: ${v.ch} appears only ${times(v.n)} in the name`;
+    case "too-few": return v.n === 1 ? `Hard mode: name must contain ${v.ch}`
+      : `Hard mode: name must contain ${v.ch} ${times(v.n)}`;
   }
   return null;
+}
+
+// hard mode: the guess must be one that could still be the answer (greens
+// stay, a letter never goes back to a slot where it showed grey or yellow,
+// letter counts stay within what the feedback allows). Message or null.
+function hardModeViolation(prevGuesses, answer, guess) {
+  return hintMessage(MuldleHints.violation(revealedHints(prevGuesses, answer), guess));
 }
 
 /* ============ configuration & answer model ============ */
@@ -202,10 +202,9 @@ function resetCurrent() {
     if (!MODEL.slots[i].playable) { current[i] = MODEL.slots[i].ch; locked[i] = true; }
   }
   if (isHardMode() && !finished) {
-    for (const g of guesses) {
-      for (let i = 0; i < ANSWER.length; i++) {
-        if (g[i] === ANSWER[i]) { current[i] = ANSWER[i]; locked[i] = true; }
-      }
+    const { fixed } = revealedHints(guesses, ANSWER); // the same greens hard mode enforces
+    for (let i = 0; i < ANSWER.length; i++) {
+      if (fixed[i] !== undefined) { current[i] = fixed[i]; locked[i] = true; }
     }
   }
   cursor = nextFreeSlot(0);
@@ -724,19 +723,22 @@ function handleKey(k) {
     return;
   }
   if (!/^[0-9A-Z]$/.test(k)) return;
-  // hard mode bans greyed-out characters (absent everywhere tried) at type time,
-  // not only on Enter — the key carries .absent exactly when it is grey
-  if (isHardMode() && keyEls[k] && keyEls[k].classList.contains("absent")) {
-    showMessage(`Hard mode: there is no ${k} in the name`);
-    return;
-  }
   // cursor past the end: fall back to the first empty playable slot, if any
   let at = cursor;
   if (at >= len) {
     at = 0;
     while (at < len && current[at] !== undefined) at++;
-    if (at >= len) return; // row full
   }
+  const full = at >= len;
+  // hard mode refuses at type time what a partial row can already break (a
+  // letter the name lacks, one back in a slot where it showed grey or yellow,
+  // one too many); Enter checks the rest, from the same knowledge. A full row
+  // still says when a letter isn't in the name at all.
+  if (isHardMode()) {
+    const block = MuldleHints.typeBlock(revealedHints(guesses, ANSWER), full ? -1 : at, k, current);
+    if (block) { showMessage(hintMessage(block)); return; }
+  }
+  if (full) return;
   current[at] = k;
   cursor = nextFreeSlot(at + 1);
   renderCurrent();
@@ -758,7 +760,8 @@ function submitGuess() {
   let guess = "";
   for (let i = 0; i < MODEL.slots.length; i++) guess += current[i];
 
-  // a repeat can't reveal anything new: refuse it in both modes
+  // a repeat can't reveal anything new. Hard mode refuses it anyway (it can't
+  // be the answer); this covers normal mode, which has no hint rules
   if (guesses.includes(guess)) { showMessage("You already guessed that"); shakeRow(); return; }
 
   if (isHardMode()) {

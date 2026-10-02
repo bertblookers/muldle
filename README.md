@@ -17,8 +17,10 @@ to find its identifier, e.g. `NGC0042` or `IC1023A`.
   magnitude, and the angular distance and direction to the target.
 - Click a submitted guess to see that object in a sky view (Aladin Lite);
   after the game the view shows the target.
-- **Hard mode** is on by default: revealed hints must be used in subsequent
-  guesses, and greyed-out characters may not be reused.
+- **Hard mode** is on by default: every guess must be one that could still
+  be the answer. Greens stay in place, a character can't return to a tile
+  where it was yellow or grey, and character counts must fit the feedback
+  (stricter than NYT Wordle's hard mode).
 
 ## Modes
 

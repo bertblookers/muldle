@@ -116,10 +116,9 @@ function resetCurrentRow() {
   current = [];
   lockedTiles = [];
   if (hardMode && !finished) {
-    for (const g of guesses) {
-      for (let i = 0; i < WORD_LEN; i++) {
-        if (g[i] === answer[i]) { current[i] = answer[i]; lockedTiles[i] = true; }
-      }
+    const { fixed } = revealedHints(guesses, answer); // the same greens hard mode enforces
+    for (let i = 0; i < WORD_LEN; i++) {
+      if (fixed[i] !== undefined) { current[i] = fixed[i]; lockedTiles[i] = true; }
     }
   }
   cursor = nextFreeTile(0);
@@ -346,78 +345,53 @@ function scoreGuess(guess, answer) {
   return result;
 }
 
-/* ============ hard mode (standard Wordle rules, plus grey ban) ============ */
+/* ============ hard mode: a guess must be one that could still be the answer ============ */
 
+// Orders the keyboard colours only (display). Hard mode's rules come from the
+// per-tile, per-character knowledge in hints.js, shared with ABC mode.
 const KEY_RANK = { absent: 0, present: 1, correct: 2 };
 
-// All revealed hints must be used: green tiles must stay in place, yellow
-// characters must appear somewhere in the new guess, and characters that
-// are greyed out (absent everywhere they were tried, never green/yellow)
-// may not be used again. Returns a message describing the first violation,
-// or null if the guess is acceptable.
-function hardModeViolation(prevGuesses, answer, guess) {
-  return hintViolation(revealedHints(prevGuesses, answer), guess);
-}
-
-// the hints revealed by the previous guesses, scored once: each guess with its
-// score, plus every char's best score (the keyboard colouring) for the grey ban
+// what the previous guesses revealed (see hints.js)
 function revealedHints(prevGuesses, answer) {
-  const rank = {}; // char -> best score it ever received
-  const scored = prevGuesses.map(prev => {
-    const score = scoreGuess(prev, answer);
-    for (let i = 0; i < WORD_LEN; i++) {
-      const r = KEY_RANK[score[i]];
-      if (!(prev[i] in rank) || r > rank[prev[i]]) rank[prev[i]] = r;
-    }
-    return { prev, score };
-  });
-  return { scored, rank };
+  return MuldleHints.fromGuesses(prevGuesses, answer, scoreGuess);
 }
 
-function hintViolation({ scored, rank }, guess) {
-  for (const { prev, score } of scored) {
-    for (let i = 0; i < WORD_LEN; i++) {
-      if (score[i] === "correct" && guess[i] !== prev[i]) {
-        return prev[i] === BLANK
-          ? `Hard mode: tile ${i + 1} must stay blank`
-          : `Hard mode: tile ${i + 1} must be ${prev[i]}`;
-      }
-    }
-    for (let i = 0; i < WORD_LEN; i++) {
-      if (score[i] !== "present") continue;
-      // a yellow char must be reused somewhere...
-      if (!guess.includes(prev[i])) {
-        return `Hard mode: guess must contain ${prev[i]}`;
-      }
-      // ...but not back in the tile it was yellow in — a yellow at i always
-      // means "this char is in the identifier, but not at position i" (sound
-      // even with duplicate chars)
-      if (guess[i] === prev[i]) {
-        return prev[i] === BLANK
-          ? `Hard mode: tile ${i + 1} must not be blank`
-          : `Hard mode: tile ${i + 1} is not ${prev[i]}`;
-      }
-    }
-  }
-  for (const ch of guess) {
-    if (rank[ch] === 0) {
-      return ch === BLANK
-        ? "Hard mode: the identifier has no blank tiles"
-        : `Hard mode: there is no ${ch} in the identifier`;
-    }
+// a hints.js violation in ID-mode words (null stays null)
+function hintMessage(v) {
+  if (!v) return null;
+  const times = n => (n === 2 ? "twice" : `${n} times`);
+  const blank = v.ch === BLANK, tile = `tile ${v.tile + 1}`, s = v.n === 1 ? "" : "s";
+  switch (v.code) {
+    case "fixed": return blank ? `Hard mode: ${tile} must stay blank` : `Hard mode: ${tile} must be ${v.ch}`;
+    case "absent": return blank ? "Hard mode: the identifier has no blank tiles"
+      : `Hard mode: there is no ${v.ch} in the identifier`;
+    case "not-here": return blank ? `Hard mode: ${tile} must not be blank` : `Hard mode: ${tile} is not ${v.ch}`;
+    case "too-many": return blank ? `Hard mode: the identifier has only ${v.n} blank tile${s}`
+      : v.n === 1 ? `Hard mode: there is only one ${v.ch} in the identifier`
+      : `Hard mode: ${v.ch} appears only ${times(v.n)} in the identifier`;
+    case "too-few": return blank ? `Hard mode: guess needs ${v.n} blank tile${s}`
+      : v.n === 1 ? `Hard mode: guess must contain ${v.ch}` : `Hard mode: guess must contain ${v.ch} ${times(v.n)}`;
   }
   return null;
 }
 
+// Every revealed hint must be kept: greens stay, a character never goes back
+// to a tile where it showed grey or yellow, and each character's count stays
+// within what the feedback allows (so greyed-out characters are banned, and an
+// earlier guess can't come back). Returns a message for the first broken rule,
+// or null if the guess could still be the answer.
+function hardModeViolation(prevGuesses, answer, guess) {
+  return hintMessage(MuldleHints.violation(revealedHints(prevGuesses, answer), guess));
+}
+
 // How many identifiers hard mode would accept as the next guess: every allowed
-// one not guessed yet that keeps to all the hints revealed so far. Shown in the
+// one that could still be the answer (never an earlier guess). Shown in the
 // info line, as lettered answers can leave only a handful (2 of 12001 is not
-// unusual). The hints are scored once, not once per candidate.
+// unusual). The hints are built once, not once per candidate.
 function legalGuessCount(prevGuesses, answer) {
   const hints = revealedHints(prevGuesses, answer);
-  const tried = new Set(prevGuesses);
   let n = 0;
-  for (const w of ALLOWED) if (!tried.has(w) && !hintViolation(hints, w)) n++;
+  for (const w of ALLOWED) if (!MuldleHints.violation(hints, w)) n++;
   return n;
 }
 
@@ -1027,20 +1001,22 @@ function handleKey(k) {
   }
   // any character goes anywhere; validity is checked on Enter
   if (!/^[0-9A-Z]$/.test(k)) return;
-  // hard mode bans greyed-out characters (absent everywhere already tried);
-  // reject them at type time too, not only on Enter. The keyboard key carries
-  // the .absent class exactly when it is grey — the same condition hardModeViolation uses.
-  if (hardMode && keyEls[k] && keyEls[k].classList.contains("absent")) {
-    showMessage(`Hard mode: there is no ${k} in the identifier`);
-    return;
-  }
   // cursor past the end: fall back to the first empty tile (if any is left)
   let at = cursor;
   if (at >= WORD_LEN) {
     at = 0;
     while (at < WORD_LEN && current[at] !== undefined) at++;
-    if (at >= WORD_LEN) return; // row full
   }
+  const full = at >= WORD_LEN;
+  // hard mode refuses at type time what a partial row can already break (a
+  // character the answer lacks, one back in a tile where it showed grey or
+  // yellow, one too many); Enter checks the rest, from the same knowledge. A
+  // full row still says when a character isn't in the identifier at all.
+  if (hardMode) {
+    const block = MuldleHints.typeBlock(revealedHints(guesses, answer), full ? -1 : at, k, current);
+    if (block) { showMessage(hintMessage(block)); return; }
+  }
+  if (full) return;
   current[at] = k;
   cursor = nextFreeTile(at + 1);
   renderCurrentRow();
@@ -1071,8 +1047,8 @@ function submitGuess() {
     rejectGuess(guess);
     return;
   }
-  // a repeat can't reveal anything new: refuse it in both modes (hard mode
-  // alone lets one through when its greys are duplicates of greens elsewhere)
+  // a repeat can't reveal anything new. Hard mode refuses it anyway (it can't
+  // be the answer); this covers normal mode, which has no hint rules
   if (guesses.includes(guess)) {
     showMessage(`${displayName(guess)} was already guessed`);
     rejectGuess(guess);

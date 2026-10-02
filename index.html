@@ -72,7 +72,7 @@
     and hit Enter. To change one character, click its tile (or use &larr;
     &rarr;) and type over it.</p>
     <p>Above the board, <strong>✖</strong> counts the guesses that were
-    refused (not a known identifier, or breaking hard mode) &mdash; it also
+    refused (not a known identifier, a repeat, or breaking hard mode) &mdash; it also
     goes into the share text.</p>
     <p>After each guess the tiles show how close you are:
     <span class="mini correct">green</span> = right character, right place;
@@ -90,12 +90,14 @@
     the board; when the game is over the view shows the target, and clicking
     guesses lets you compare.</p>
     <p><strong>Hard mode</strong> is on by default (toggle in settings ⚙):
-    revealed hints must be used in subsequent guesses &mdash; green tiles
-    must stay in place, yellow characters must be reused, and greyed-out
-    characters may not be used again. Since greens are locked in anyway,
+    every guess must be one that could still be the answer. Green tiles stay
+    in place; a character can't go back to a tile where it was yellow or
+    grey, even if it is green elsewhere; and the counts must fit: a grey 1
+    next to a green 1 means there is exactly one 1, and a character that was
+    only ever grey isn't there at all. Since greens are locked in anyway,
     each new row starts with them already filled; typing fills the
     remaining tiles and Backspace skips the greens. The line above the board
-    shows how many identifiers still fit all your hints.</p>
+    shows how many identifiers could still be the answer.</p>
     <p>Switch to <strong>ABC</strong> mode (toggle by the title) to guess the
     object's common name instead of its catalogue number.</p>
     <p>A new puzzle appears every day at midnight (local time).</p>
@@ -161,8 +163,10 @@
     <span class="mini present">yellow</span> = in the name, wrong place;
     <span class="mini absent">grey</span> = not in the name.</p>
     <p><strong>Hard mode</strong> (toggle in settings ⚙, in ID mode) applies
-    here too: revealed greens stay put and are pre-filled, yellows must be
-    reused, greys may not.</p>
+    here too: every guess must be one that could still be the name. Revealed
+    greens stay put and are pre-filled, a letter can't go back to a spot where
+    it was yellow or grey, and letter counts must fit what the colours
+    showed.</p>
     <p>Switch back to <strong>ID</strong> mode (toggle by the title) to guess
     the catalogue number instead.</p>
     <p>A new puzzle appears every day at midnight (local time).</p>
@@ -209,6 +213,7 @@
 <script src="data.js"></script>
 <script src="names.js"></script>
 <script src="surveys.js"></script>
+<script src="hints.js"></script>
 <script src="game.js"></script>
 <script src="abc.js"></script>
 </body>
