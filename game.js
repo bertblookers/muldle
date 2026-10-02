@@ -79,7 +79,7 @@ function displayName(padded) {
 }
 
 // A minority of in-game objects have a well-known common name (curated in
-// data/common_names.tsv). Returns the name or null. Used by the end-of-game
+// data/common_names_v1.tsv). Returns the name or null. Used by the end-of-game
 // reveal. NAME_BY_ID is defined further down; this is only called at game end.
 function commonName(padded) {
   return NAME_BY_ID.get(displayName(padded)) || null;
@@ -101,7 +101,7 @@ let lockedTiles = [];      // hard mode: positions prefilled with known greens
 let cursor = 0;            // tile the next typed character goes into; WORD_LEN =
                            // past the end (row full, or moved off with →)
 let rejected = 0;          // guesses refused this puzzle (unknown identifier,
-                           // SIMBAD-less entry, or a hard-mode violation)
+                           // SIMBAD-less entry, a repeat, or a hard-mode violation)
 let lastRejected = null;   // the row's last refused guess: re-submitting it
                            // unchanged (held / double-tapped Enter) isn't a new try
 let finished = false;      // won or lost
@@ -410,13 +410,14 @@ function hintViolation({ scored, rank }, guess) {
 }
 
 // How many identifiers hard mode would accept as the next guess: every allowed
-// one that keeps to all the hints revealed so far. Shown in the info line, as
-// lettered answers can leave only a handful (2 of 12001 is not unusual). The
-// hints are scored once, not once per candidate.
+// one not guessed yet that keeps to all the hints revealed so far. Shown in the
+// info line, as lettered answers can leave only a handful (2 of 12001 is not
+// unusual). The hints are scored once, not once per candidate.
 function legalGuessCount(prevGuesses, answer) {
   const hints = revealedHints(prevGuesses, answer);
+  const tried = new Set(prevGuesses);
   let n = 0;
-  for (const w of ALLOWED) if (!hintViolation(hints, w)) n++;
+  for (const w of ALLOWED) if (!tried.has(w) && !hintViolation(hints, w)) n++;
   return n;
 }
 
@@ -1070,6 +1071,13 @@ function submitGuess() {
     rejectGuess(guess);
     return;
   }
+  // a repeat can't reveal anything new: refuse it in both modes (hard mode
+  // alone lets one through when its greys are duplicates of greens elsewhere)
+  if (guesses.includes(guess)) {
+    showMessage(`${displayName(guess)} was already guessed`);
+    rejectGuess(guess);
+    return;
+  }
   if (hardMode) {
     const violation = hardModeViolation(guesses, answer, guess);
     if (violation) {
@@ -1184,7 +1192,7 @@ function updateInfo() {
   if (rejected) {
     const rej = document.createElement("span");
     rej.className = "rejected-count";
-    rej.title = "Rejected guesses this puzzle (unknown identifier or a hard-mode break)";
+    rej.title = "Rejected guesses this puzzle (unknown identifier, a repeat or a hard-mode break)";
     rej.textContent = `✖ ${rejected}`;
     infoEl.append(" · ", rej);
   }

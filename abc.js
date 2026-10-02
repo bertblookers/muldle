@@ -758,6 +758,9 @@ function submitGuess() {
   let guess = "";
   for (let i = 0; i < MODEL.slots.length; i++) guess += current[i];
 
+  // a repeat can't reveal anything new: refuse it in both modes
+  if (guesses.includes(guess)) { showMessage("You already guessed that"); shakeRow(); return; }
+
   if (isHardMode()) {
     const violation = hardModeViolation(guesses, ANSWER, guess);
     if (violation) { showMessage(violation); shakeRow(); return; }
