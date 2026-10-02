@@ -504,6 +504,7 @@ function buildBoard() {
   // size tiles to fit the whole name on ONE line (no wrap): cols = tiles,
   // wgaps = extra between-word gaps (see --abc-tile-size in style.css)
   boardEl.style.setProperty("--abc-cols", MODEL.slots.length);
+  boardEl.style.setProperty("--abc-fixed", MODEL.slots.filter(s => !s.playable).length);
   boardEl.style.setProperty("--abc-wgaps", Math.max(0, MODEL.words.length - 1));
   for (let r = 0; r < MAX_GUESSES; r++) {
     const row = document.createElement("div");
@@ -556,13 +557,20 @@ function buildKeyboard() {
 
 /* ============ rendering ============ */
 
+// a fixed punctuation slot as shown: the typographic apostrophe reads as one
+// on a narrow tile, where a straight ' looks like a dot (the stored answer and
+// guesses keep the plain character)
+function shownPunct(ch) {
+  return ch === "'" ? "’" : ch;
+}
+
 function renderCurrent() {
   const r = guesses.length;
   if (r >= MAX_GUESSES) return;
   for (let i = 0; i < MODEL.slots.length; i++) {
     const t = tiles[r][i];
     t.classList.remove("filled", "locked", "cursor", "editable");
-    if (!MODEL.slots[i].playable) { t.textContent = MODEL.slots[i].ch; continue; }
+    if (!MODEL.slots[i].playable) { t.textContent = shownPunct(MODEL.slots[i].ch); continue; }
     const ch = current[i];
     if (ch === undefined) { t.textContent = ""; }
     else { t.textContent = ch; t.classList.add(locked[i] ? "locked" : "filled"); }
@@ -581,7 +589,7 @@ function renderGuessRow(r, guess) {
   const score = scoreGuess(guess, ANSWER);
   for (let i = 0; i < MODEL.slots.length; i++) {
     const t = tiles[r][i];
-    if (!MODEL.slots[i].playable) { t.textContent = MODEL.slots[i].ch; continue; }
+    if (!MODEL.slots[i].playable) { t.textContent = shownPunct(MODEL.slots[i].ch); continue; }
     t.textContent = guess[i];
     t.classList.remove("filled", "locked", "cursor", "editable");
     t.classList.add(score[i]);

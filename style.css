@@ -885,11 +885,12 @@ footer a { color: var(--accent); }
 .abc-board {
   /* size tiles so the entire name fits ONE line within the available width
      (capped at 3rem, floored at 1.5rem — longer than that and the board just
-     scrolls). cols = total tiles, wgaps = extra between-word gaps, both set
-     from JS. width = cols*tile + (cols-1)*tile-gap + wgaps*0.5rem */
+     scrolls). cols = all slots, fixed = punctuation slots (drawn 0.4 tile
+     wide), wgaps = between-word gaps (an extra 0.5 tile each), all set from
+     JS. width = (cols - 0.6*fixed + 0.5*wgaps)*tile + (cols-1)*tile-gap */
   --abc-tile-size: clamp(1.5rem,
-    calc((min(100vw - 1.5rem, 60rem) - (var(--abc-cols) - 1) * var(--tile-gap)
-      - var(--abc-wgaps) * 0.5rem) / var(--abc-cols)),
+    calc((min(100vw - 1.5rem, 60rem) - (var(--abc-cols) - 1) * var(--tile-gap))
+      / (var(--abc-cols) - 0.6 * var(--abc-fixed, 0) + 0.5 * var(--abc-wgaps))),
     3rem);
   align-items: center;
   max-width: 100%;
@@ -901,7 +902,9 @@ footer a { color: var(--accent); }
   flex-wrap: nowrap;               /* the name stays on one line */
   width: max-content;
   justify-content: center;
-  gap: calc(var(--tile-gap) + 0.5rem); /* between-word gap */
+  /* between-word gap: half a tile more than between letters, so a word break
+     reads as a space and never as a missing letter */
+  gap: calc(var(--tile-gap) + var(--abc-tile-size) * 0.5);
   touch-action: manipulation;
 }
 .abc-word { display: flex; gap: var(--tile-gap); }
@@ -911,12 +914,17 @@ footer a { color: var(--accent); }
   height: var(--abc-tile-size);
   font-size: calc(var(--abc-tile-size) * 0.5);
 }
-/* spaces are gaps; apostrophes / hyphens are shown but not typed or scored */
+/* spaces are gaps; apostrophes / hyphens are shown but not typed or scored.
+   Drawn narrow and pulled in to their letters, like punctuation in print
+   (MIRACH'S, BOW-TIE), so they never look like a gap between words */
 .abc-board .tile.fixed {
+  width: calc(var(--abc-tile-size) * 0.4);
+  margin: 0 calc(var(--tile-gap) * -0.5);
   border-color: transparent;
   background: transparent;
-  color: var(--dim);
-  font-weight: 400;
+  color: var(--text);
+  font-size: calc(var(--abc-tile-size) * 0.65);
+  font-weight: 700;
 }
 
 /* a guessed row that matches a real named object is clickable (sky view) */
