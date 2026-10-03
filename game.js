@@ -1312,16 +1312,18 @@ function tileClicked(r, c) {
 }
 
 function submitGuess() {
+  // tiles left empty count as blanks, e.g. "NGC0042" -> "NGC0042 "
+  let guess = "";
+  for (let i = 0; i < WORD_LEN; i++) guess += current[i] ?? BLANK;
   // sparse iteration: only typed tiles are visited, so this asks for input
-  // until the player has typed at least one character beyond the prefill
-  if (!current.some((ch, i) => !lockedTiles[i])) {
+  // until the player has typed at least one character beyond the prefill —
+  // unless the prefill is itself an identifier: hard mode's greens NGC244 +
+  // blanks can be the answer with nothing left to type
+  if (!current.some((ch, i) => !lockedTiles[i]) && !pool.index.has(guess)) {
     showMessage("Type an identifier first");
     shakeCurrentRow();
     return;
   }
-  // tiles left empty count as blanks, e.g. "NGC0042" -> "NGC0042 "
-  let guess = "";
-  for (let i = 0; i < WORD_LEN; i++) guess += current[i] ?? BLANK;
   if (!pool.index.has(guess)) {
     showMessage(refusalMessage(guess));
     rejectGuess(guess);
