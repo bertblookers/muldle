@@ -896,6 +896,16 @@ function renderGuessRow(r, guess) {
     t.classList.add(score[c]);
     if (guess[c] !== BLANK) upgradeKey(guess[c], score[c]);
   }
+  markDoneKeys([...guesses.slice(0, r), guess]);
+}
+
+// a key whose every copy is found (hints.js `placed`) is marked done; it only
+// looks different with the "Mark completed keys" setting on (a class on
+// <body>), so toggling the setting needs no re-render
+function markDoneKeys(scored) {
+  for (const c of MuldleHints.placed(revealedHints(scored, answer))) {
+    if (keyEls[c]) keyEls[c].classList.add("done");
+  }
 }
 
 function upgradeKey(key, status) {
@@ -1407,22 +1417,30 @@ const backToDailyBtn = document.getElementById("back-to-daily");
 const hardModeToggle = document.getElementById("hard-mode-toggle");
 const byCatalogueRow = document.getElementById("by-catalogue-row");
 const byCatalogueToggle = document.getElementById("by-catalogue-toggle");
+const doneKeysToggle = document.getElementById("done-keys-toggle");
 
 // preferences survive across days, unlike the per-day game state
 const SETTINGS_KEY = "muldle-settings-v1";
 let hardMode = true;      // default on
 let byCatalogue = false;  // random practice: each catalogue equally likely (ID only)
+let doneKeys = true;      // completed keys dark green (both modes; display only)
 
 function loadSettings() {
   try {
     const s = JSON.parse(localStorage.getItem(SETTINGS_KEY));
     if (s && typeof s.hardMode === "boolean") hardMode = s.hardMode;
     if (s && typeof s.byCatalogue === "boolean") byCatalogue = s.byCatalogue;
+    if (s && typeof s.doneKeys === "boolean") doneKeys = s.doneKeys;
   } catch (e) { /* corrupt settings: keep defaults */ }
 }
 
 function saveSettings() {
-  try { localStorage.setItem(SETTINGS_KEY, JSON.stringify({ hardMode, byCatalogue })); } catch (e) { /* ignore */ }
+  try { localStorage.setItem(SETTINGS_KEY, JSON.stringify({ hardMode, byCatalogue, doneKeys })); } catch (e) { /* ignore */ }
+}
+
+// both keyboards carry the done marks always; this class shows them
+function applyDoneKeys() {
+  document.body.classList.toggle("done-keys", doneKeys);
 }
 
 hardModeToggle.addEventListener("change", () => {
@@ -1438,6 +1456,12 @@ hardModeToggle.addEventListener("change", () => {
 byCatalogueToggle.addEventListener("change", () => {
   byCatalogue = byCatalogueToggle.checked;
   saveSettings();
+});
+
+doneKeysToggle.addEventListener("change", () => {
+  doneKeys = doneKeysToggle.checked;
+  saveSettings();
+  applyDoneKeys();
 });
 
 // legalGuessCount scans all identifiers, so remember the last result; it only
@@ -1488,7 +1512,7 @@ function clearBoardUI() {
     rowEl.classList.remove("guessed", "viewing");
     rowEl.removeAttribute("title");
   }
-  for (const k in keyEls) keyEls[k].classList.remove("correct", "present", "absent");
+  for (const k in keyEls) keyEls[k].classList.remove("correct", "present", "absent", "done");
   puzzleGen++; // invalidate in-flight hint fetches
   for (const cells of hintCells) {
     for (const key in cells) setHint(cells[key], "", "");
@@ -1715,6 +1739,8 @@ buildHintPanel();
 loadSettings();
 hardModeToggle.checked = hardMode;
 byCatalogueToggle.checked = byCatalogue;
+doneKeysToggle.checked = doneKeys;
+applyDoneKeys();
 stampFormats();      // every save gets its fmt before anything reads it
 MuldleStats.pruneFuture(RESULTS_KEY, DAY); // drop stale entries for impossible future numbers
 MuldleStats.pruneFuture(ARCHIVE_KEY, DAY);

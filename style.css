@@ -418,6 +418,9 @@ main {
 .key.correct { background: var(--correct); }
 .key.present { background: var(--present); }
 .key.absent  { background: #23263a; color: var(--dim); }
+/* every copy found ("Mark completed keys"): --correct's hue and saturation at
+   the grey key's HSV value (#4c9a4c -> V 22.7%), so it reads green but spent */
+body.done-keys .key.correct.done { background: #1d3a1d; color: var(--dim); }
 
 .help {
   max-width: 30rem;

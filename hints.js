@@ -90,5 +90,16 @@ function violation(k, word) {
   return null;
 }
 
-return { knowledge, fromGuesses, typeBlock, violation };
+// The characters whose every copy is found: the count is known exactly (a grey
+// showed) and that many tiles are green with it. Display only: the keyboard
+// shows these keys as done (dark green), as no tile is left for them.
+function placed(k) {
+  const done = new Set();
+  for (const [c, n] of k.max) {
+    if (n > 0 && k.fixed.filter(x => x === c).length === n) done.add(c);
+  }
+  return done;
+}
+
+return { knowledge, fromGuesses, typeBlock, violation, placed };
 })();

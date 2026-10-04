@@ -546,6 +546,15 @@ function renderGuessRow(r, guess) {
     t.classList.add(score[i]);
     upgradeKey(guess[i], score[i]);
   }
+  markDoneKeys([...guesses.slice(0, r), guess]);
+}
+
+// a key whose every copy is found is marked done (shown only with the setting
+// on, see game.js's markDoneKeys)
+function markDoneKeys(scored) {
+  for (const c of MuldleHints.placed(revealedHints(scored, ANSWER))) {
+    if (keyEls[c]) keyEls[c].classList.add("done");
+  }
 }
 
 function upgradeKey(key, status) {
