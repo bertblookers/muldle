@@ -5,7 +5,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Muldle — Find the astronomical object name or identifier</title>
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="style.css?v=0dd1990135">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 </head>
 <body>
@@ -140,7 +140,7 @@
       <button type="button" class="mode-seg" data-mode="abc" aria-pressed="true">ABC</button>
     </div>
   </div>
-  <p class="tagline">Name today's deep-sky object.</p>
+  <p class="tagline" id="abc-tagline">Name today's deep-sky object.</p>
   <div class="puzzle-nav" id="abc-puzzle-nav" role="group" aria-label="Puzzle navigator">
     <button type="button" id="abc-nav-prev" class="nav-btn nav-step" aria-label="Previous puzzle">&laquo;</button>
     <button type="button" id="abc-nav-today" class="nav-btn nav-num" aria-label="Back to today's puzzle" title="Back to today's puzzle">Puzzle #<span id="abc-nav-num-val">0</span></button>
@@ -175,7 +175,10 @@
     <summary>How to play</summary>
     <p>Guess the common name of today's deep-sky object in 6 tries &mdash;
     e.g. <code>ORION NEBULA</code>, <code>SOMBRERO GALAXY</code>. Only well-known
-    named objects appear here, so the pool is much smaller than in ID mode.</p>
+    named objects appear here, so the pool is much smaller than in ID mode.
+    <span id="abc-help-v3" hidden>Two days a week the answer is a constellation
+    (<code>URSA MAJOR</code>), a bright star (<code>SIRIUS</code>), an asterism
+    (<code>BIG DIPPER</code>) or a famous object outside the catalogues instead.</span></p>
     <p>Type letters (and, rarely, digits); spaces, hyphens and apostrophes are
     filled in for you. Fill every tile, then hit Enter. To change one letter,
     click its tile (or use &larr; &rarr;) and type over it.</p>
@@ -242,16 +245,17 @@
   <a href="https://github.com/bertblookers/muldle/blob/main/ATTRIBUTION.md" target="_blank" rel="noopener">Data credits</a></p>
 </footer>
 
-<script src="data.js"></script>
-<script src="data_v2.js"></script>
-<script src="names.js"></script>
-<script src="names_v2.js"></script>
-<script src="aka.js"></script>
-<script src="surveys.js"></script>
-<script src="hints.js"></script>
-<script src="stats.js"></script>
-<script src="game.js"></script>
-<script src="abc.js"></script>
-<script src="start.js"></script>
+<script src="data.js?v=0dd1990135"></script>
+<script src="data_v2.js?v=0dd1990135"></script>
+<script src="names.js?v=0dd1990135"></script>
+<script src="names_v2.js?v=0dd1990135"></script>
+<script src="names_v3.js?v=0dd1990135"></script>
+<script src="aka.js?v=0dd1990135"></script>
+<script src="surveys.js?v=0dd1990135"></script>
+<script src="hints.js?v=0dd1990135"></script>
+<script src="stats.js?v=0dd1990135"></script>
+<script src="game.js?v=0dd1990135"></script>
+<script src="abc.js?v=0dd1990135"></script>
+<script src="start.js?v=0dd1990135"></script>
 </body>
 </html>

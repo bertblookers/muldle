@@ -90,6 +90,38 @@ In the ShareAlike spirit of those sources, this curated list (as shipped in
 [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/): anyone is
 welcome to reuse it, with attribution, under the same terms.
 
+## Constellations, stars, asterisms and other sky names (ABC from 12 October 2026)
+
+ABC mode's names beyond deep-sky objects (`names_v3.js`) and the lines
+drawn over their sky view (`skylines.js`) were built at build time from:
+
+- **IAU constellations** — the 88 constellation names and abbreviations of
+  the International Astronomical Union
+  ([IAU constellations page](https://iauarchive.eso.org/public/themes/constellations/));
+  their English names from that page and from English Wikipedia (text under
+  [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/)).
+- **Constellation outlines** — [VizieR catalogue VI/49](https://cdsarc.cds.unistra.fr/viz-bin/cat/VI/49):
+  A. C. Davenhall & S. K. Leggett, *Constellation Boundary Data* (1989),
+  file `constbnd.dat` prepared by Bill J. Gray (Project Pluto, 2007); the
+  1875.0 borders (Delporte 1930) precessed to J2000 at build time.
+- **Star names** — the IAU Working Group on Star Names' *IAU Catalog of Star
+  Names* ([IAU-CSN](https://www.pas.rochester.edu/~emamajek/WGSN/IAU-CSN.txt),
+  2022 edition; two later names from the
+  [IAU's 2026 announcement](https://www.iau.org/IAU/News/Ann2026/New-Star-Names-2026.aspx)).
+  IAU products are released under Creative Commons Attribution.
+- **Positions** of the stars and asterism stars from SIMBAD (credited above;
+  the stars are identified by their Hipparcos numbers, ESA 1997).
+- **Asterism names and figures** — English Wikipedia (CC BY-SA 4.0), *BBC Sky
+  at Night Magazine*, *Astronomy* magazine and NASA's Night Sky Network.
+  Only the names and the stars they join are used, as facts; no text is copied.
+- **Famous objects outside the catalogues** (the Large Magellanic Cloud,
+  Cassiopeia A, the Einstein Cross, ...) — names from English Wikipedia
+  (CC BY-SA 4.0), SIMBAD and NASA/ESA/Chandra/Hubble pages; positions and
+  types from SIMBAD, sizes from SIMBAD and Wikipedia.
+
+As with the common names, this curated list is in turn offered under
+[CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/).
+
 ## Angular sizes (the sky view's zoom)
 
 How far the sky view zooms out for each object (`sizes.js`) is decided at
@@ -128,7 +160,11 @@ progressive-survey layers. Except where noted, the HiPS are generated and
 served by CDS from each survey's original data:
 
 - **DSS2** — Digitized Sky Survey 2 (STScI).
+- **MELL** — Axel Mellinger's all-sky Milky Way panorama (Mellinger 2009,
+  PASP 121, 1180), suggested for views tens of degrees wide.
 - **SDSS** — Sloan Digital Sky Survey, DR9.
+- **HST** — Hubble Space Telescope images (NASA/ESA; Hubble Legacy Archive
+  data), as a HiPS by CDS; covers only Hubble's pointed fields.
 - **GALEX** — Galaxy Evolution Explorer, GR6/7 AIS (NASA / Caltech–JPL).
 - **2MASS** — Two Micron All Sky Survey (UMass / IPAC–Caltech; NASA / NSF).
 - **IRAC** — Spitzer Space Telescope / IRAC (NASA / JPL–Caltech).

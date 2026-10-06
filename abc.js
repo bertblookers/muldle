@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // ABC mode: a Wordle over the common NAME of a deep-sky object (e.g. "ORION
-// NEBULA"). ABC keeps its own state and game logic (board, answer model,
-// saves, scoring); shared, mode-neutral pieces live in one place both modes
-// use: hints.js (hard mode), stats.js (results store + Stats & history view)
-// and game.js's era switch (ERA_V2_START) and catalogue pools (poolFor,
-// simbadQuery) for the sky reveal. Reads ABC_NAMES (names.js, v1) and
-// ABC_NAMES_V2 (names_v2.js, v2) for the answer pools. Also owns the ID<->ABC
-// flip at the bottom of the file.
+// NEBULA"), and from the v3 era also of a constellation, star, asterism or
+// famous object outside the catalogues ("URSA MAJOR", "SIRIUS"). ABC keeps its
+// own state and game logic (board, answer model, saves, scoring); shared,
+// mode-neutral pieces live in one place both modes use: hints.js (hard mode),
+// stats.js (results store + Stats & history view) and game.js's era switch
+// (ERA_V2_START, ERA_ABC_V3_START) and catalogue pools (poolFor, simbadQuery)
+// for the sky reveal. Reads ABC_NAMES (names.js, v1), ABC_NAMES_V2
+// (names_v2.js, v2) and ABC_SKY_V3 + SKY_INFO (names_v3.js, v3) for the answer
+// pools. Also owns the ID<->ABC flip at the bottom of the file.
 //
 // Wrapped in an IIFE: game.js and abc.js are both classic scripts sharing one
 // global lexical scope, and many top-level names (ANSWER, scoreGuess, guesses,
@@ -118,10 +120,15 @@ const ABC_ARCHIVE_KEY = "muldle-abc-archive-v1";
 // fmt isn't a row valid for its era is skipped and left untouched in storage.
 const ABC_FORMATS = {
   // the common name as tiles: letters and digits upper-cased, punctuation kept,
-  // spaces dropped ("ORIONNEBULA", "CODDINGTON'SNEBULA"). Every era so far.
+  // spaces dropped ("ORIONNEBULA", "CODDINGTON'SNEBULA").
   1: { eras: ["v1", "v2"] },
+  // the same tiles, for a v3 puzzle. Its own row because v3 gave its days new
+  // answers: v2-era code (a stale tab) reads it as foreign and leaves it alone
+  // instead of scoring it against the day's old answer.
+  2: { eras: ["v3"] },
 };
-const ABC_FMT_CURRENT = 1;
+// the format a save of puzzle d is written in
+function abcFmtOfDay(d) { return abcEraOfDay(d) === "v3" ? 2 : 1; }
 function abcKnownFormat(fmt, era) {
   return Number.isInteger(fmt) && Object.prototype.hasOwnProperty.call(ABC_FORMATS, fmt) &&
     ABC_FORMATS[fmt].eras.includes(era);
@@ -137,7 +144,9 @@ function buildAnswerModel(name) {
     const wi = [];
     for (const raw of word) {
       const ch = raw.toUpperCase();
-      slots.push({ ch, playable: /[A-Z0-9]/.test(ch) });
+      // letters, digits and the asterisk of Sagittarius A* are typed; other
+      // punctuation (apostrophes, hyphens) is a fixed tile
+      slots.push({ ch, playable: /[A-Z0-9*]/.test(ch) });
       wi.push(slots.length - 1);
     }
     words.push(wi);
@@ -149,34 +158,97 @@ function buildAnswerModel(name) {
 const nameKey = (name) => buildAnswerModel(name).answer;
 
 // Eras switch on game.js's ERA_V2_START, the same date as ID mode (ABC puzzle
-// #19). v1: the 134 v1 names in their frozen order (tools/test_golden.mjs pins
-// it). v2: names_v2.js's 179 names (v1's plus the new catalogues' objects) in a
-// new seeded order, also pinned once it ships. An entry's `id` is in its era's
-// catalogue format: v1 "NGC0224" (format 1), v2 "M31".
+// #19), and ERA_ABC_V3_START, ABC only (#26). v1: the 134 v1 names in their
+// frozen order (tools/test_golden.mjs pins it). v2: names_v2.js's 179 names
+// (v1's plus the new catalogues' objects) in a new seeded order. v3: v2's
+// names plus names_v3.js's constellations, stars, asterisms and objects
+// outside the catalogues (ABC_SKY_V3) on a weekly schedule (below). Every
+// era is pinned once it ships. An entry's `id` is in its era's catalogue
+// format: v1 "NGC0224" (format 1), v2 and v3 "M31"; a v3 sky name's id is
+// its SKY_INFO key ("con:UMa", "star:HIP32349").
 // the first seed from 20261008 on whose order never has the same object on the
 // same date as ID mode in the first 10 years (tools/test_golden.mjs checks)
 const ABC_V2_SEED = 20261013;
 const ABC_V2_FIRST_DAY = daysBetween(ABC_EPOCH, ERA_V2_START);
-function abcEraOfDay(d) { return d >= ABC_V2_FIRST_DAY ? "v2" : "v1"; }
+const ABC_V3_FIRST_DAY = daysBetween(ABC_EPOCH, ERA_ABC_V3_START);
+function abcEraOfDay(d) { return d >= ABC_V3_FIRST_DAY ? "v3" : d >= ABC_V2_FIRST_DAY ? "v2" : "v1"; }
+// per era: its names, and the catalogue pool of game.js (catEra, catFmt) its
+// deep-sky ids live in
 const ABC_ERAS = {
-  v1: { names: ABC_NAMES, idNames: ID_NAMES, catFmt: 1 },
-  v2: { names: ABC_NAMES_V2, idNames: ID_NAMES_V2, catFmt: 2 },
+  v1: { names: ABC_NAMES, idNames: ID_NAMES, catEra: "v1", catFmt: 1 },
+  v2: { names: ABC_NAMES_V2, idNames: ID_NAMES_V2, catEra: "v2", catFmt: 2 },
+  v3: { names: ABC_NAMES_V2.concat(ABC_SKY_V3), idNames: ID_NAMES_V2.concat(ABC_SKY_V3), catEra: "v2", catFmt: 2 },
 };
 
+const mod = (n, m) => ((n % m) + m) % m;
 const ABC_ORDER = shuffledOrder(ABC_NAMES, ABC_SEED); // v1, frozen
 // the v1 {name, id} entry for any ABC puzzle number (wraps mod 134)
-function v1EntryForDay(d) { return ABC_ORDER[((d % ABC_ORDER.length) + ABC_ORDER.length) % ABC_ORDER.length]; }
+function v1EntryForDay(d) { return ABC_ORDER[mod(d, ABC_ORDER.length)]; }
 // v2: the names v1 already played (ABC #0-#18) close the first cycle, so the
 // switch doesn't bring back a name from days before; each part is shuffled
 const ABC_V1_PLAYED = new Set(Array.from({ length: ABC_V2_FIRST_DAY }, (_, d) => v1EntryForDay(d).name));
 const ABC_V2_ORDER = shuffledOrder(ABC_NAMES_V2.filter(e => !ABC_V1_PLAYED.has(e.name)), ABC_V2_SEED)
   .concat(shuffledOrder(ABC_NAMES_V2.filter(e => ABC_V1_PLAYED.has(e.name)), ABC_V2_SEED));
+// the v2 entry for any puzzle number from v2's first day (wraps mod 179)
+function v2EntryForDay(d) { return ABC_V2_ORDER[mod(d - ABC_V2_FIRST_DAY, ABC_V2_ORDER.length)]; }
+
+// v3 (from 2026-10-12, a Monday): in every Monday-Sunday week two days, drawn
+// by a seeded RNG, come from the sky names (ABC_SKY_V3) and the other five
+// from v2's deep-sky names. The k-th sky day of the era takes the k-th name
+// of a seeded shuffle of the sky names, deep-sky days likewise; each sequence
+// wraps mod its length. The deep-sky names played before v3 (#0-#25) close
+// its first cycle, as in v2. The deep-sky seed is the first from 20261012 on
+// whose days never have the same object as ID mode on the same date in the
+// first 10 years (tools/test_golden.mjs checks); sky names are never ID answers.
+const ABC_V3_DEEP_SEED = 20261018;
+const ABC_V3_SKY_SEED = 20261014;
+const ABC_V3_WEEK_SEED = 20261015;
+const ABC_PLAYED_BEFORE_V3 = new Set(Array.from({ length: ABC_V3_FIRST_DAY },
+  (_, d) => (d >= ABC_V2_FIRST_DAY ? v2EntryForDay(d) : v1EntryForDay(d)).name));
+const ABC_V3_DEEP_ORDER = shuffledOrder(ABC_NAMES_V2.filter(e => !ABC_PLAYED_BEFORE_V3.has(e.name)), ABC_V3_DEEP_SEED)
+  .concat(shuffledOrder(ABC_NAMES_V2.filter(e => ABC_PLAYED_BEFORE_V3.has(e.name)), ABC_V3_DEEP_SEED));
+const ABC_V3_SKY_ORDER = shuffledOrder(ABC_SKY_V3, ABC_V3_SKY_SEED);
+
+// the two sky days (0 = Monday ... 6 = Sunday) of v3 week w, ascending
+function skyDaysOfWeek(w) {
+  const rand = mulberry32((ABC_V3_WEEK_SEED + Math.imul(w, 0x9E3779B1)) >>> 0);
+  const a = Math.floor(rand() * 7);
+  let b = Math.floor(rand() * 6);
+  if (b >= a) b++;
+  return a < b ? [a, b] : [b, a];
+}
+
+// the v3 entry for any puzzle number from v3's first day
+function v3EntryForDay(d) {
+  const k = d - ABC_V3_FIRST_DAY, w = Math.floor(k / 7), day = k - 7 * w;
+  const [a, b] = skyDaysOfWeek(w);
+  if (day === a || day === b) return ABC_V3_SKY_ORDER[mod(2 * w + (day === b), ABC_V3_SKY_ORDER.length)];
+  return ABC_V3_DEEP_ORDER[mod(5 * w + day - (a < day) - (b < day), ABC_V3_DEEP_ORDER.length)];
+}
+
 const DAY = dayIndex(ABC_EPOCH);
 // the {name, id} entry for any ABC puzzle number (the navigator plays past ones)
 function entryForDay(d) {
-  if (abcEraOfDay(d) === "v1") return v1EntryForDay(d);
-  const k = d - ABC_V2_FIRST_DAY, n = ABC_V2_ORDER.length;
-  return ABC_V2_ORDER[((k % n) + n) % n];
+  const e = abcEraOfDay(d);
+  return e === "v3" ? v3EntryForDay(d) : e === "v2" ? v2EntryForDay(d) : v1EntryForDay(d);
+}
+
+// a v3 sky name's reveal and sky-view data (names_v3.js), or undefined for a
+// deep-sky id
+const skyInfo = id => (Object.prototype.hasOwnProperty.call(SKY_INFO, id) ? SKY_INFO[id] : undefined);
+// deep-sky names that read without "the": people's possessives, proper names,
+// radio sources, a leading "The" (but "the Cat's Eye Nebula", "the 37 Cluster")
+const BARE_DEEP_NAMES = new Set(["47 Tucanae", "Barnard's Galaxy", "Barnard's Merope Nebula", "Bode's Galaxy",
+  "Caroline's Cluster", "Caroline's Rose", "Centaurus A", "Cleopatra's Eye", "Coddington's Nebula", "Fornax A",
+  "Fornax B", "Hind's Variable Nebula", "Hubble's Variable Nebula", "Mairan's Nebula", "Mirach's Ghost",
+  "Omega Centauri", "Perseus A", "Ptolemy's Cluster", "Seyfert's Sextet", "Stephan's Quintet", "The Eyes Galaxies",
+  "Thor's Helmet", "Virgo A"]);
+// a name as the reveal writes it: a sky name's own form ("Boötes") with or
+// without "the" as the data says; a deep-sky name with "the" unless it reads bare
+function theName(name, id) {
+  const s = skyInfo(id);
+  if (!s) return (BARE_DEEP_NAMES.has(name) ? "" : "the ") + name;
+  return (s.the ? "the " : "") + (s.show || name);
 }
 const TODAY = entryForDay(DAY);
 
@@ -291,6 +363,17 @@ function normAbcEntry(e, day) {
   return abcEraOfDay(day) === "v1" ? { ...e, fmt: 1 } : null;
 }
 
+// A format-1 entry of a v3 day was written by v2-era code still running after
+// the v3 switch (a stale tab or cached page): a game of that day's v2 name.
+// Format 1 isn't a v3 row, so it is foreign there and a v3 board never shows
+// it. A played daily's result stays in the results store (its streak and
+// history are real); today's save and the archive drop or overwrite it, so it
+// never blocks the day's v3 game.
+function staleV2AbcEntry(e, day) {
+  e = normAbcEntry(e, day);
+  return !!e && typeof e === "object" && e.fmt === 1 && abcEraOfDay(day) === "v3";
+}
+
 // Writes normAbcEntry's reading back to every store on load, like game.js's
 // stampFormats. Idempotent; the readers apply the same rule, so a failed write
 // changes nothing. A present but unknown fmt is left alone.
@@ -305,12 +388,15 @@ function stampAbcFormats() {
       else if (JSON.stringify(out) !== raw) localStorage.setItem(key, JSON.stringify(out));
     } catch (e) { /* corrupt or full: the readers normalise anyway */ }
   };
-  update(ABC_STORAGE_KEY, s => normAbcEntry(s, s.day));
+  // a stale v2-era save of today would block today's v3 game: it goes (one of
+  // an earlier day stays for migrateStaleAbcDaily to record its result)
+  update(ABC_STORAGE_KEY, s => (s.day === DAY && staleV2AbcEntry(s, s.day) ? null : normAbcEntry(s, s.day)));
   for (const key of [ABC_ARCHIVE_KEY, ABC_RESULTS_KEY]) {
     update(key, store => {
       for (const k of Object.keys(store)) {
         const e = normAbcEntry(store[k], Number(k));
-        if (e === null) delete store[k]; else store[k] = e;
+        if (e === null || (key === ABC_ARCHIVE_KEY && staleV2AbcEntry(e, Number(k)))) delete store[k];
+        else store[k] = e;
       }
       return store;
     });
@@ -334,16 +420,17 @@ function entryGuesses(e, day) {
 
 // today's daily (and the random object) live in muldle-abc-v1, keyed on DAY;
 // an off-day puzzle browsed via the navigator goes to the archive store.
-// Neither overwrites a foreign entry.
+// Neither overwrites a foreign entry (a stale v2-era one it may).
 function saveState() {
   if (randomName || abcViewDay === DAY) {
-    if (foreignAbcEntry(loadAbcToday(), DAY)) return;
+    const t = loadAbcToday();
+    if (foreignAbcEntry(t, DAY) && !staleV2AbcEntry(t, DAY)) return;
     localStorage.setItem(ABC_STORAGE_KEY,
-      JSON.stringify({ day: DAY, name: activeName, guesses, randomName, fmt: ABC_FMT_CURRENT }));
+      JSON.stringify({ day: DAY, name: activeName, guesses, randomName, fmt: abcFmtOfDay(DAY) }));
   } else {
     const a = loadAbcArchive();
-    if (foreignAbcEntry(a[abcViewDay], abcViewDay)) return;
-    a[abcViewDay] = { guesses, fmt: ABC_FMT_CURRENT };
+    if (foreignAbcEntry(a[abcViewDay], abcViewDay) && !staleV2AbcEntry(a[abcViewDay], abcViewDay)) return;
+    a[abcViewDay] = { guesses, fmt: abcFmtOfDay(abcViewDay) };
     localStorage.setItem(ABC_ARCHIVE_KEY, JSON.stringify(a));
   }
 }
@@ -413,7 +500,7 @@ function recordCurrentAbcResult(solved) {
     solved,
     tries: solved ? guesses.length : null,
     playedOnDay: abcViewDay === DAY,
-    fmt: ABC_FMT_CURRENT,
+    fmt: abcFmtOfDay(abcViewDay),
   });
 }
 
@@ -424,7 +511,10 @@ function migrateStaleAbcDaily() {
     const raw = JSON.parse(localStorage.getItem(ABC_STORAGE_KEY));
     const s = raw && typeof raw.day === "number" ? normAbcEntry(raw, raw.day) : null;
     if (!s || s.day >= DAY || s.randomName) return;
-    if (typeof s.name !== "string" || !Array.isArray(s.guesses) || foreignAbcEntry(s, s.day)) return;
+    // a stale v2-era daily of a v3 day is recorded too (its name is saved
+    // with it, so it scores against what was played)
+    if (typeof s.name !== "string" || !Array.isArray(s.guesses) ||
+      (foreignAbcEntry(s, s.day) && !staleV2AbcEntry(s, s.day))) return;
     const ans = buildAnswerModel(s.name).answer;
     const gs = s.guesses.filter(g => typeof g === "string" && g.length === ans.length);
     if (!gs.length) return;
@@ -440,6 +530,8 @@ const boardEl = document.getElementById("abc-board");
 const messageEl = document.getElementById("abc-message");
 const keyboardEl = document.getElementById("abc-keyboard");
 const infoEl = document.getElementById("abc-puzzle-info");
+const taglineEl = document.getElementById("abc-tagline");
+const helpV3El = document.getElementById("abc-help-v3");
 
 const navEl = document.getElementById("abc-puzzle-nav");
 const navPrevBtn = document.getElementById("abc-nav-prev");
@@ -485,11 +577,12 @@ function buildKeyboard() {
   keyboardEl.replaceChildren();
   keyEls = {};
   const rows = [];
-  // a digit row only when the day's name actually has a number (only
-  // "47 Tucanae" does) — otherwise the keyboard is letters only
+  // a digit row only when the day's name actually has a number (47
+  // Tucanae, Cygnus X-1), a * key only for Sagittarius A* — otherwise the
+  // keyboard is letters only
   if (/[0-9]/.test(ANSWER)) rows.push([..."1234567890"]);
   rows.push([..."QWERTYUIOP"]);
-  rows.push([..."ASDFGHJKL"]);
+  rows.push([..."ASDFGHJKL", ...(ANSWER.includes("*") ? ["*"] : [])]); // the row with room for a 10th key
   rows.push(["Enter", ..."ZXCVBNM", "Back"]);
   for (const rowKeys of rows) {
     const row = document.createElement("div");
@@ -584,13 +677,18 @@ function shakeRow() {
 }
 
 function updateInfo() {
+  // the tagline and How to play speak of sky names only on a v3 puzzle
+  const v3 = abcEra === "v3";
+  taglineEl.textContent = v3 ? "Name what's in today's sky." : "Name today's deep-sky object.";
+  helpV3El.hidden = !v3;
   // the puzzle number now lives in the navigator; the info line carries context
-  const size = era().names.length;
+  // (from v3 not every answer is an object: a constellation is a region)
+  const size = era().names.length, what = v3 ? "names" : "named objects";
   infoEl.textContent = randomName
-    ? `Random name · ${size} named objects`
+    ? `Random name · ${size} ${what}`
     : abcViewDay !== DAY
-      ? `Archive · ${size} named objects`
-      : `${size} named objects`;
+      ? `Archive · ${size} ${what}`
+      : `${size} ${what}`;
 }
 
 function updateNav() {
@@ -613,13 +711,57 @@ let aladinView = null;
 let shownId = null; // catalogue id currently in the panel, or null
 let surveyCtl = null; // survey picker controller (surveys.js), built on first show
 
-// an entry id's catalogue data (game.js's pool of the era in play): position,
-// constellation, the id SIMBAD knows the object by (null: none of its own) and
-// its pool word (for game.js's viewFov)
+let skyOverlay = null; // the lines drawn over the view (sky names only)
+const WIDE_VIEW = 50;  // degrees: from this view width on, suggest the wide-view survey
+
+// an entry id's data for the sky view: position, constellations, the id SIMBAD
+// knows it by (null: none of its own) and, for a deep-sky id, its pool word
+// (for game.js's viewFov). A deep-sky id's come from game.js's pool of the era
+// in play, a v3 sky name's from SKY_INFO (`sky`, with its own view width).
 function catalogueEntry(id) {
-  const p = poolFor(abcEra, era().catFmt), w = fullWord(id), i = p.index.get(w);
-  return i === undefined ? { pos: null, con: "", ident: null }
-    : { pos: p.positions[i], con: p.constellations[i], ident: simbadQuery(w, p), word: w, pool: p };
+  const s = skyInfo(id);
+  if (s) return { pos: s.pos, cons: s.kind === "constellation" ? [] : s.cons, ident: s.simbad || null, sky: s };
+  const p = poolFor(era().catEra, era().catFmt), w = fullWord(id), i = p.index.get(w);
+  return i === undefined ? { pos: null, cons: [], ident: null }
+    : { pos: p.positions[i], cons: [p.constellations[i]].filter(Boolean), ident: simbadQuery(w, p), word: w, pool: p };
+}
+
+// skylines.js (a constellation's outline, an asterism's figure; ~130 KB) loads
+// with the sky view of a sky name. Never rejects: without it, no lines.
+let skyLinesReady = null;
+function loadSkyLines() {
+  if (!skyLinesReady) {
+    skyLinesReady = new Promise(resolve => {
+      if (typeof SKY_LINES !== "undefined") { resolve(); return; }
+      const s = document.createElement("script");
+      s.src = "skylines.js" + ASSET_QUERY; // game.js: this release's version
+      s.onload = s.onerror = () => resolve();
+      document.head.appendChild(s);
+    });
+  }
+  return skyLinesReady;
+}
+
+// draw the shown name's lines over the view: a constellation's outline, an
+// asterism's figure, a ring round a star; nothing for anything else
+function drawSkyLines(id) {
+  if (!skyOverlay) {
+    skyOverlay = A.graphicOverlay({ color: "#ffcf4d", lineWidth: 1.5 });
+    aladinView.addOverlay(skyOverlay);
+  }
+  skyOverlay.removeAll();
+  const s = skyInfo(id);
+  if (!s) return;
+  const lines = typeof SKY_LINES !== "undefined" && SKY_LINES[id];
+  if (lines) {
+    for (const flat of lines) {
+      const pts = [];
+      for (let i = 0; i < flat.length; i += 2) pts.push([flat[i], flat[i + 1]]);
+      skyOverlay.add(A.polyline(pts));
+    }
+  } else if (s.kind === "star") {
+    skyOverlay.add(A.circle(s.pos[0], s.pos[1], s.fov * 0.08));
+  }
 }
 
 let aladinReady = null;
@@ -663,12 +805,14 @@ function markViewingRow() {
 
 function renderCaption(id, otype) {
   const isTarget = id === activeId;
-  const { pos, con, ident } = catalogueEntry(id);
+  const { pos, cons, ident, sky } = catalogueEntry(id);
   const role = document.createElement("span");
   role.className = "object-role" + (isTarget ? " target" : "");
   role.textContent = isTarget ? "target" : "guess";
   const link = document.createElement("a");
-  if (ident === null && pos) {
+  if (sky) {
+    link.href = sky.link;
+  } else if (ident === null && pos) {
     // no SIMBAD object of its own: a coordinate search instead of a dead page
     link.href = "https://simbad.cds.unistra.fr/simbad/sim-coo?Coord=" +
       encodeURIComponent(`${pos[0]} ${pos[1] >= 0 ? "+" : ""}${pos[1]}`) + "&Radius=2&Radius.unit=arcmin";
@@ -678,12 +822,18 @@ function renderCaption(id, otype) {
   }
   link.target = "_blank";
   link.rel = "noopener";
-  link.textContent = era().byId.get(id) || spacedId(id);
-  captionEl.replaceChildren(role, " ", link, " · ", spacedId(id));
-  if (otype) captionEl.append(" · " + otype);
-  // constellation, for parity with ID mode's richer caption (CONSTELLATION_NAMES
+  link.textContent = (sky && sky.show) || era().byId.get(id) || spacedId(id);
+  captionEl.replaceChildren(role, " ", link);
+  const label = sky ? sky.label : spacedId(id); // an asterism has no designation
+  if (label) captionEl.append(" · ", label);
+  // a sky name says what it is in words (SIMBAD's codes don't fit a
+  // constellation or asterism); a star adds its magnitude
+  const what = sky ? sky.type || sky.kind : otype;
+  if (what) captionEl.append(" · " + what);
+  if (sky && sky.mag != null) captionEl.append(" · mag " + String(sky.mag).replace("-", "−"));
+  // constellation(s), for parity with ID mode's richer caption (CONSTELLATION_NAMES
   // is a game.js top-level const, shared across the two classic scripts)
-  if (con) captionEl.append(" · " + (CONSTELLATION_NAMES[con] || con));
+  if (cons.length) captionEl.append(" · " + cons.map(c => CONSTELLATION_NAMES[c] || c).join(", "));
   if (finished && !isTarget) {
     const back = document.createElement("a");
     back.href = "#";
@@ -696,6 +846,7 @@ function renderCaption(id, otype) {
 function hideObjectPanel() {
   shownId = null;
   aladinView = null;
+  skyOverlay = null;
   markViewingRow();
   panelEl.hidden = true;
   aladinDiv.replaceChildren();
@@ -724,7 +875,7 @@ function showObject(id) {
     }
   }
 
-  const { pos, ident, word, pool: p } = catalogueEntry(id);
+  const { pos, ident, word, pool: p, sky } = catalogueEntry(id);
   renderCaption(id, "");
   if (!pos) return;
   // spinner in the caption while the object's SIMBAD data is on its way
@@ -732,9 +883,20 @@ function showObject(id) {
   spinner.className = "spinner";
   captionEl.append(" ", spinner);
 
-  Promise.all([loadAladin(), fetchInfo(ident), loadViewSizes()]).then(([, info]) => {
+  // a sky name brings its own type and view width (and lines); a deep-sky
+  // object's type comes from SIMBAD, its size from sizes.js
+  const extras = sky ? [Promise.resolve({ otype: "" }), loadSkyLines()] : [fetchInfo(ident), loadViewSizes()];
+  Promise.all([loadAladin(), ...extras]).then(([, info]) => {
     if (shownId !== id) return; // another row clicked meanwhile
-    const fov = viewFov(word, p);
+    const fov = sky ? sky.fov : viewFov(word, p);
+    // the survey that shows it best: a sky name's own pick (an object only an
+    // infrared or X-ray survey shows; a fast-moving star in 2MASS, whose epoch
+    // matches its J2000 position), else the clean all-sky mosaic for a view
+    // tens of degrees wide (DSS2 shows its plate seams there), else DSS2
+    if (surveyCtl) {
+      surveyCtl.suggest((sky && sky.survey) ||
+        (fov >= WIDE_VIEW ? window.MuldleSurveys.WIDE_ID : window.MuldleSurveys.DEFAULT_ID));
+    }
     if (aladinView) aimSkyView(aladinView, pos, fov);
     else {
       aladinView = A.aladin("#abc-aladin-div", {
@@ -745,6 +907,7 @@ function showObject(id) {
         showFrame: false, showCooGridControl: false, showProjectionControl: false,
       });
     }
+    drawSkyLines(id);
     if (surveyCtl) {
       surveyCtl.apply(aladinView);
       window.MuldleSurveys.updateCoverage(surveyCtl, pos[0], pos[1]);
@@ -760,10 +923,13 @@ function showObject(id) {
   });
 }
 
-// the target's other established names for the reveal (game.js's otherNames
-// over the era's catalogue pool), never the name just played
+// the target's other established names for the reveal (a sky name's own list,
+// else game.js's otherNames over the era's catalogue pool), never the name
+// just played
 function revealOthers() {
-  const p = poolFor(abcEra, era().catFmt);
+  const s = skyInfo(activeId);
+  if (s) return (s.aka || []).filter(n => n !== activeName && n !== s.show);
+  const p = poolFor(era().catEra, era().catFmt);
   return otherNames(fullWord(activeId), p).filter(n => n !== activeName);
 }
 
@@ -809,7 +975,7 @@ function handleKey(k) {
     renderCurrent();
     return;
   }
-  if (!/^[0-9A-Z]$/.test(k)) return;
+  if (!/^[0-9A-Z*]$/.test(k)) return;
   // cursor past the end: fall back to the first empty playable slot, if any
   let at = cursor;
   if (at >= len) {
@@ -863,13 +1029,13 @@ function submitGuess() {
   if (guess === ANSWER) {
     finished = true;
     recordCurrentAbcResult(true);
-    showMessage(`${WIN_MESSAGES[guesses.length - 1]} It was the ${activeName}.`, true, revealOthers());
+    showMessage(`${WIN_MESSAGES[guesses.length - 1]} It was ${theName(activeName, activeId)}.`, true, revealOthers());
     showObject(activeId);
     showPostGame();
   } else if (guesses.length >= MAX_GUESSES) {
     finished = true;
     recordCurrentAbcResult(false);
-    showMessage(`Out of guesses — it was the ${activeName}.`, true, revealOthers());
+    showMessage(`Out of guesses — it was ${theName(activeName, activeId)}.`, true, revealOthers());
     showObject(activeId);
     showPostGame();
   }
@@ -892,7 +1058,7 @@ document.addEventListener("keydown", (e) => {
     e.preventDefault(); // only while a row is being typed: a long finished name
     handleKey(e.key === "ArrowLeft" ? "Left" : "Right"); // still arrow-scrolls
   }
-  else if (/^[0-9]$/.test(e.key)) handleKey(e.key);
+  else if (/^[0-9*]$/.test(e.key)) handleKey(e.key);
   else if (/^[a-zA-Z]$/.test(e.key)) handleKey(e.key.toUpperCase());
 });
 
@@ -949,13 +1115,13 @@ function renderAbcState() {
   if (guesses.length && guesses[guesses.length - 1] === ANSWER) {
     finished = true;
     recordCurrentAbcResult(true);
-    showMessage(`Already solved — it was the ${activeName}.`, true, revealOthers());
+    showMessage(`Already solved — it was ${theName(activeName, activeId)}.`, true, revealOthers());
     showObject(activeId);
     showPostGame();
   } else if (guesses.length >= MAX_GUESSES) {
     finished = true;
     recordCurrentAbcResult(false);
-    showMessage(`Out of guesses — it was the ${activeName}.`, true, revealOthers());
+    showMessage(`Out of guesses — it was ${theName(activeName, activeId)}.`, true, revealOthers());
     showObject(activeId);
     showPostGame();
   }
@@ -1148,7 +1314,8 @@ if (window.__muldle) {
 window.__abc = { get NAME() { return activeName; }, get ANSWER() { return ANSWER; },
   DAY, get POOL() { return era().names.length; }, get era() { return abcEra; }, entryForDay,
   get viewDay() { return abcViewDay; }, get model() { return MODEL; },
-  get aladin() { return aladinView; } }; // e2e/debug hook
+  get aladin() { return aladinView; }, fmtOf: abcFmtOfDay,
+  get skyLines() { return skyOverlay && skyOverlay.overlayItems ? skyOverlay.overlayItems.length : null; } }; // e2e/debug hook
 
 buildBoard();
 buildKeyboard();

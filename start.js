@@ -5,7 +5,9 @@
 // puzzle in progress or finished goes straight to the board, and so does a
 // ?p=N link (it already names the puzzle). Whether this browser has seen an
 // update's list is remembered per update (muldle-seen-v1, local only, nothing
-// is sent anywhere): unseen, the list starts open; seen, it starts folded.
+// is sent anywhere): unseen, the list starts open; seen, it starts folded. A
+// returning player (one with play history) who missed earlier updates gets
+// their lists too, under "Earlier"; a new player only the latest.
 // Loaded after game.js and abc.js, which register window.__muldle.started.
 (function () {
 "use strict";
@@ -14,6 +16,16 @@
 // midnight; an era's update uses its switch date from game.js, so moving the
 // switch moves the list too). Keep each to at most 4-5 one-line items.
 const WHATS_NEW = [
+  {
+    id: "abc-v3",
+    date: ERA_ABC_V3_START,
+    items: [
+      "ABC mode reaches beyond deep-sky objects: constellations, bright stars, asterisms and famous objects outside the catalogues.",
+      "Two days a week the ABC answer is one of them; the other five stay deep-sky.",
+      "The sky view draws a constellation's borders and an asterism's figure.",
+      "ID mode: no change in this update.",
+    ],
+  },
   {
     id: "v2",
     date: ERA_V2_START,
@@ -40,28 +52,51 @@ const linked = !!muldle.linked;
 // window.__muldleNoGate: e2e hook, so the game suites start on the board
 if (started || linked || window.__muldleNoGate) return;
 
-// the latest update that has started (local date)
+// the updates that have started (local date), newest first; the latest one
 const now = new Date();
 const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-const update = WHATS_NEW.find(u => new Date(u.date.y, u.date.m - 1, u.date.d) <= today);
+const startedUpdates = WHATS_NEW.filter(u => new Date(u.date.y, u.date.m - 1, u.date.d) <= today);
+const update = startedUpdates[0];
+let seenId = null;
+try { seenId = localStorage.getItem(SEEN_KEY); } catch (e) { /* ignore */ }
+// a returning player: any play history in either mode
+function returning() {
+  try {
+    return ["muldle-results-v1", "muldle-abc-results-v1", "muldle-v1", "muldle-abc-v1"]
+      .some(k => localStorage.getItem(k) !== null);
+  } catch (e) { return false; }
+}
+// the updates to list: the latest, plus for a returning player every earlier
+// one newer than the last seen (all of them if none was seen)
+function updatesToShow() {
+  if (!update || seenId === update.id || !returning()) return update ? [update] : [];
+  const i = startedUpdates.findIndex(u => u.id === seenId);
+  return startedUpdates.slice(0, i < 0 ? startedUpdates.length : i);
+}
+const fmtDate = u => new Date(u.date.y, u.date.m - 1, u.date.d)
+  .toLocaleDateString(undefined, { day: "numeric", month: "long", year: "numeric" });
 
 document.getElementById("start-puzzle").textContent =
   `${mode === "abc" ? "ABC" : "ID"} · Puzzle #${muldle.today ? muldle.today[mode] : ""}`;
 
 if (update) {
   const box = document.getElementById("whats-new");
-  const d = new Date(update.date.y, update.date.m - 1, update.date.d);
-  document.getElementById("whats-new-date").textContent =
-    d.toLocaleDateString(undefined, { day: "numeric", month: "long", year: "numeric" });
+  document.getElementById("whats-new-date").textContent = fmtDate(update);
   const list = document.getElementById("whats-new-list");
-  for (const text of update.items) {
-    const li = document.createElement("li");
-    li.textContent = text;
-    list.appendChild(li);
-  }
-  let seen = false;
-  try { seen = localStorage.getItem(SEEN_KEY) === update.id; } catch (e) { /* ignore */ }
-  box.open = !seen;
+  updatesToShow().forEach((u, k) => {
+    if (k) {
+      const head = document.createElement("li");
+      head.className = "whats-new-earlier";
+      head.textContent = "Earlier, " + fmtDate(u) + ":";
+      list.appendChild(head);
+    }
+    for (const text of u.items) {
+      const li = document.createElement("li");
+      li.textContent = text;
+      list.appendChild(li);
+    }
+  });
+  box.open = seenId !== update.id;
   box.hidden = false;
 }
 

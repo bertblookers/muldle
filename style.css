@@ -491,6 +491,7 @@ body.done-keys .key.correct.done { background: #1d3a1d; color: var(--dim); }
 .whats-new-date { color: var(--dim); font-weight: 400; font-size: 0.8rem; margin-left: 0.3rem; }
 .whats-new ul { margin: 0.5rem 0 0.1rem 1.1rem; }
 .whats-new li { margin: 0.25rem 0; }
+.whats-new li.whats-new-earlier { list-style: none; margin: 0.6rem 0 0 -1.1rem; color: var(--dim); }
 @media (max-width: 430px) {
   .start-screen { padding-top: 2rem; }
   .start-puzzle { margin-top: 1.1rem; }

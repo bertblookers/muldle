@@ -73,6 +73,10 @@ const mod = (n, m) => ((n % m) + m) % m;
 // ?p=N links depend on every past answer staying put. A switch date must come
 // after the deploy that introduces it, so no daily in progress changes answer.
 const ERA_V2_START = { y: 2026, m: 10, d: 5 }; // a Monday: v2's weeks start here
+// ABC mode only: from this Monday ABC's answers reach beyond deep-sky objects
+// (constellations, stars, asterisms, objects outside the catalogues; abc.js,
+// names_v3.js). ID mode stays v2. abc.js and start.js read it.
+const ERA_ABC_V3_START = { y: 2026, m: 10, d: 12 };
 const ID_ERAS = [
   { key: "v1", firstDay: 0 },
   { key: "v2", firstDay: daysBetween(EPOCH, ERA_V2_START) }, // puzzle #27
@@ -959,6 +963,13 @@ function shakeCurrentRow() {
 
 const ALADIN_SRC = "https://aladin.cds.unistra.fr/AladinLite/api/v3/latest/aladin.js";
 const SIMBAD_TAP = "https://simbad.cds.unistra.fr/simbad/sim-tap/sync";
+// The release's asset version: the public index.html asks for game.js?v=<hash>
+// (tools/export_public.py) so a release is never served from cache under an
+// old URL; the files loaded later (sizes.js, abc.js's skylines.js) ask with the
+// same query. Empty in the development repo.
+const ASSET_QUERY = (() => {
+  try { return new URL(document.currentScript.src).search; } catch (e) { return ""; }
+})();
 
 const panelEl = document.getElementById("object-panel");
 const captionEl = document.getElementById("object-caption");
@@ -993,7 +1004,7 @@ function loadViewSizes() {
     viewSizesReady = new Promise(resolve => {
       if (typeof VIEW_SIZES !== "undefined") { resolve(); return; }
       const s = document.createElement("script");
-      s.src = "sizes.js";
+      s.src = "sizes.js" + ASSET_QUERY;
       s.onload = s.onerror = () => resolve();
       document.head.appendChild(s);
     });

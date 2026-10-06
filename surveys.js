@@ -7,13 +7,17 @@
 "use strict";
 
 // Surveys offered as a stacked column of square buttons, DSS2 (the original
-// default) first. `id` is an Aladin Lite HiPS id; `fullSky` surveys skip the
+// default) first, then Mellinger, an all-sky optical mosaic that stays clean
+// in views tens of degrees wide where DSS2 shows its plate seams (ABC suggests
+// it for a wide constellation, see suggest below). `id` is an Aladin Lite HiPS id; `fullSky` surveys skip the
 // coverage check (always enabled). Partial-sky surveys are greyed out where the
 // shown object has no coverage (see updateCoverage). HiPS ids from the CDS
 // registry: https://aladin.cds.unistra.fr/hips/list
 const SURVEYS = [
   { key: "dss2",  label: "DSS2",  id: "P/DSS2/color",           fullSky: true  }, // optical (default)
+  { key: "mell",  label: "MELL",  id: "P/Mellinger/color",      fullSky: true  }, // optical, wide views
   { key: "sdss",  label: "SDSS",  id: "P/SDSS9/color",          fullSky: false }, // optical, ~N. sky
+  { key: "hst",   label: "HST",   id: "CDS/P/HST/color",        fullSky: false }, // Hubble, pointed fields
   { key: "galex", label: "GALEX", id: "P/GALEXGR6/AIS/color",   fullSky: false }, // UV
   { key: "2mass", label: "2MASS", id: "P/2MASS/color",          fullSky: true  }, // near-IR
   { key: "irac",  label: "IRAC",  id: "P/SPITZER/color",        fullSky: false }, // mid-IR (Spitzer, galactic)
@@ -23,6 +27,7 @@ const SURVEYS = [
 ];
 
 const DEFAULT_ID = SURVEYS[0].id;
+const WIDE_ID = SURVEYS[1].id;
 const COVERAGE_RADIUS_DEG = 0.1;
 const coverageCache = new Map(); // "ra,dec" -> Set of covering HiPS ids (suffix-matched)
 
@@ -32,7 +37,12 @@ function mount(pickerEl, getView) {
   if (!pickerEl) return null;
   if (pickerEl.__surveyController) return pickerEl.__surveyController;
 
-  let currentId = DEFAULT_ID;
+  let currentId = DEFAULT_ID; // the survey shown
+  // the survey wanted: the player's pick, else the latest suggestion. Kept
+  // apart from the one shown, so a survey with no coverage at one object
+  // (shown as DSS2 there) comes back where it has coverage
+  let wantedId = DEFAULT_ID;
+  let picked = false; // the player chose a survey this page-life: suggest() leaves it be
   const buttons = new Map(); // id -> <button>
 
   SURVEYS.forEach(function (s) {
@@ -45,6 +55,8 @@ function mount(pickerEl, getView) {
     if (s.id === currentId) btn.classList.add("active");
     btn.addEventListener("click", function () {
       if (btn.disabled || s.id === currentId) return;
+      picked = true;
+      wantedId = s.id;
       select(s.id);
       const view = getView && getView();
       if (view) view.setBaseImageLayer(s.id);
@@ -62,17 +74,25 @@ function mount(pickerEl, getView) {
     });
   }
 
+  // the wanted survey, or DSS2 while it has no coverage here
+  function usable() {
+    const btn = buttons.get(wantedId);
+    return btn && btn.disabled ? DEFAULT_ID : wantedId;
+  }
+
   const controller = {
-    current: function () { return currentId; },
-    // reflect the selected survey on a (re)used view; falls back to DSS2 if the
-    // current survey is disabled for this object
+    current: usable,
+    // the survey that suits the next view, unless the player picked one
+    suggest: function (id) { if (!picked && buttons.has(id)) wantedId = id; },
+    // show the wanted survey on a (re)used view; DSS2 if it is disabled (the
+    // flags may still be the previous object's: setCoverage corrects it)
     apply: function (view) {
       if (!view) return;
-      const btn = buttons.get(currentId);
-      if (btn && btn.disabled) select(DEFAULT_ID);
+      select(usable());
       view.setBaseImageLayer(currentId);
     },
-    // enable/disable buttons from a Set of covering HiPS ids (null = all on)
+    // enable/disable buttons from a Set of covering HiPS ids (null = all on),
+    // then show the wanted survey if the new coverage changes what can be shown
     setCoverage: function (coveringIds) {
       SURVEYS.forEach(function (s) {
         const btn = buttons.get(s.id);
@@ -81,6 +101,11 @@ function mount(pickerEl, getView) {
         btn.classList.toggle("disabled", !covered);
         btn.title = covered ? s.label : s.label + " — no coverage here";
       });
+      const view = getView && getView();
+      if (view && usable() !== currentId) {
+        select(usable());
+        view.setBaseImageLayer(currentId);
+      }
     },
   };
 
@@ -122,6 +147,6 @@ function updateCoverage(controller, ra, dec) {
 
 window.MuldleSurveys = {
   mount: mount, updateCoverage: updateCoverage,
-  DEFAULT_ID: DEFAULT_ID, count: SURVEYS.length,
+  DEFAULT_ID: DEFAULT_ID, WIDE_ID: WIDE_ID, count: SURVEYS.length,
 };
 })();
