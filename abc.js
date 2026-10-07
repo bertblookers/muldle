@@ -1053,7 +1053,12 @@ document.addEventListener("keydown", (e) => {
   if (settingsDialog.open || statsDialog.open) return;
   if (e.ctrlKey || e.metaKey || e.altKey) return;
   if (e.key === "Enter") handleKey("Enter");
-  else if (e.key === "Backspace") handleKey("Back");
+  else if (e.key === "Backspace") {
+    // always ours outside a text field: a browser set to "Backspace = Back"
+    // (Firefox's browser.backspace_action = 0) would otherwise leave the game
+    if (!isTextField(e.target)) e.preventDefault();
+    handleKey("Back");
+  }
   else if ((e.key === "ArrowLeft" || e.key === "ArrowRight") && !finished && !isTextField(e.target)) {
     e.preventDefault(); // only while a row is being typed: a long finished name
     handleKey(e.key === "ArrowLeft" ? "Left" : "Right"); // still arrow-scrolls
