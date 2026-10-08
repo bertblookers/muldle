@@ -4,9 +4,10 @@
 // (updates to come; only when there are some) and Earlier updates (every
 // previous one, newest first, folded, each entry its own fold). One gate for
 // both modes, outside the flip. Shown on load only for a fresh puzzle (no
-// guess yet in the active mode): a puzzle in progress or finished goes
-// straight to the board, and so does a ?p=N link (it already names the
-// puzzle). Whether this browser has seen the latest update is remembered
+// guess yet in the active mode, no random practice, not in Unlimited: each
+// mode's window.__muldle.started says): a puzzle in progress or finished, a
+// random object and an Unlimited session go straight to the board, and so
+// does a ?p=N link (it already names the puzzle). Whether this browser has seen the latest update is remembered
 // (muldle-seen-v1, local only, nothing is sent anywhere): unseen, What's new
 // starts open; seen, folded. A returning player (one with play history) who
 // missed earlier updates finds Earlier updates open on those. Loaded after
@@ -38,8 +39,19 @@ const UPDATES = [
     ],
   },
   {
+    id: "unlimited",
+    date: { y: 2026, m: 10, d: 8 }, // the release day (exported 08-10-2026)
+    title: "Unlimited",
+    items: [
+      "Solved today's puzzle? Switch from Daily to Unlimited, beside the puzzle number, and solve random puzzles one after another, as many as you like.",
+      "A stopwatch runs from your first key; it pauses while the page is hidden.",
+      "Unlimited keeps its own stats in Stats & history, including your longest session and your best solves per hour.",
+      "Your daily streak and history stay as they are.",
+    ],
+  },
+  {
     id: "hub",
-    date: { y: 2026, m: 10, d: 8 }, // the release day: set it at the export
+    date: { y: 2026, m: 10, d: 8 }, // the release day (live since 08-10-2026)
     title: "Urania's Mirror",
     items: [
       "Muldle is one of the daily sky puzzles of Urania's Mirror: the star top left takes you to all of them.",
@@ -173,11 +185,6 @@ const UPDATES = [
 // into UPDATES, dated, when it ships. Scheduled UPDATES (a date still to
 // come) show there by themselves, before these.
 const PLANNED = [
-  {
-    id: "unlimited", // approved by the user 08-10-2026
-    title: "Unlimited",
-    items: ["Available after solving today. Solve as many puzzles as you like, as quickly as you can."],
-  },
   {
     id: "omni", // approved by the user 08-10-2026
     title: "OMNI",

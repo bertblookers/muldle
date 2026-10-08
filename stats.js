@@ -82,13 +82,31 @@ function summarize(store, today, maxGuesses) {
   };
 }
 
-// one stat tile: big value over a small label
+// one stat tile: big value over a small label (unlimited.js uses it too)
 function statTile(label, value) {
   const t = document.createElement("div"); t.className = "stat-tile";
   const v = document.createElement("div"); v.className = "stat-val"; v.textContent = String(value);
   const l = document.createElement("div"); l.className = "stat-label"; l.textContent = label;
   t.append(v, l);
   return t;
+}
+
+// the guess distribution's bars: dist[i] = games solved in i + 1 tries, the
+// bar of `current` tries highlighted (unlimited.js uses it too)
+function distBlock(dist, current = null) {
+  const box = document.createElement("div"); box.className = "stats-dist";
+  const maxCount = Math.max(1, ...dist);
+  dist.forEach((count, i) => {
+    const row = document.createElement("div"); row.className = "dist-row";
+    const num = document.createElement("span"); num.className = "dist-num"; num.textContent = String(i + 1);
+    const bar = document.createElement("span"); bar.className = "dist-bar";
+    if (i + 1 === current) bar.classList.add("current");
+    bar.style.width = (count / maxCount) * 100 + "%";
+    bar.textContent = String(count);
+    row.append(num, bar);
+    box.appendChild(row);
+  });
+  return box;
 }
 
 // One mode's results store and its Stats & history view.
@@ -102,7 +120,11 @@ function statTile(label, value) {
 //   alsoClear   keys the clear control drops besides the store: the archive,
 //               and today's save so a finished daily isn't re-recorded on load
 //   openPuzzle  (day) => void, a history row's click
-function create({ key, today, maxGuesses, keep, heading, alsoClear, openPuzzle }) {
+//   extra       optional (container) => void: more of the mode's stats,
+//               rendered before History in the dialog only (Unlimited's)
+//   onClear     optional () => void, run by the clear control after it drops
+//               the keys (Unlimited drops its totals of the mode)
+function create({ key, today, maxGuesses, keep, heading, alsoClear, openPuzzle, extra, onClear }) {
   const load = () => readStore(key);
 
   // Record one finished puzzle. A kept entry is never overwritten — a live-daily
@@ -141,21 +163,11 @@ function create({ key, today, maxGuesses, keep, heading, alsoClear, openPuzzle }
 
     const distHead = document.createElement("h3"); distHead.textContent = "Guess distribution";
     container.appendChild(distHead);
-    const dist = document.createElement("div"); dist.className = "stats-dist";
-    const maxCount = Math.max(1, ...s.dist);
     const t = store[today];
     const todayTries = (t && t.playedOnDay && t.solved) ? t.tries : null;
-    s.dist.forEach((count, i) => {
-      const row = document.createElement("div"); row.className = "dist-row";
-      const num = document.createElement("span"); num.className = "dist-num"; num.textContent = String(i + 1);
-      const bar = document.createElement("span"); bar.className = "dist-bar";
-      if (i + 1 === todayTries) bar.classList.add("current");
-      bar.style.width = (count / maxCount) * 100 + "%";
-      bar.textContent = String(count);
-      row.append(num, bar);
-      dist.appendChild(row);
-    });
-    container.appendChild(dist);
+    container.appendChild(distBlock(s.dist, todayTries));
+
+    if (includeClear && extra) extra(container);
 
     const histHead = document.createElement("h3"); histHead.textContent = "History";
     container.appendChild(histHead);
@@ -204,6 +216,7 @@ function create({ key, today, maxGuesses, keep, heading, alsoClear, openPuzzle }
       try {
         for (const k of [key, ...alsoClear]) localStorage.removeItem(k);
       } catch (e) { /* ignore */ }
+      if (onClear) onClear();
       render(container, { includeClear });
     });
     container.appendChild(clearBtn);
@@ -212,5 +225,5 @@ function create({ key, today, maxGuesses, keep, heading, alsoClear, openPuzzle }
   return { key, load, record, stats, render };
 }
 
-return { create, pruneFuture, currentStreak, summarize };
+return { create, pruneFuture, currentStreak, summarize, statTile, distBlock };
 })();

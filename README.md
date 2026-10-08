@@ -46,6 +46,11 @@ Toggle by the title between two modes, each with its own daily puzzle:
   sent anywhere.
 - **Share** your result as an emoji grid, and watch a countdown to the next
   puzzle.
+- **Unlimited** — once you've solved today's puzzle, switch from Daily to
+  Unlimited (beside the puzzle number) and solve random puzzles one after
+  another, as many as you like, in either mode. A stopwatch runs from your
+  first key; Unlimited keeps stats of its own (longest session, best solves
+  per hour), and your daily streak is left alone.
 
 ## Run locally
 

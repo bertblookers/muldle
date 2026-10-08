@@ -891,6 +891,7 @@ body > .hub-mark {
   overflow: hidden;
 }
 .mode-seg {
+  min-height: 24px; /* WCAG 2.5.8's target size, also on phones */
   background: transparent;
   color: var(--dim);
   border: none;
@@ -939,6 +940,92 @@ body > .hub-mark {
   .nav-btn:not(:disabled):hover { color: var(--text); } /* brighten only, no fill */
 }
 
+/* The navigator's row: « Puzzle #N » and, once today's daily is solved, the
+   Daily | Unlimited toggle beside it; in Unlimited the navigator gives way to
+   the session's stopwatch. Each part carries its own top margin, so a row
+   with nothing shown takes no room. */
+.nav-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  column-gap: 0.5rem;
+}
+.play-toggle {
+  display: inline-flex;
+  margin-top: 0.4rem;
+  border: 1px solid var(--tile-filled-border);
+  border-radius: 0.4rem;
+  overflow: hidden;
+}
+.play-seg {
+  min-height: 24px; /* WCAG 2.5.8's target size, also on phones */
+  background: transparent;
+  color: var(--dim);
+  border: none;
+  padding: 0.2rem 0.7rem;
+  font-size: 0.8rem;
+  font-weight: 700;
+  line-height: 1.4;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  transition: background 0.2s, color 0.2s;
+  -webkit-tap-highlight-color: transparent;
+}
+.play-seg + .play-seg { border-left: 1px solid var(--tile-filled-border); }
+.play-seg[aria-pressed="true"] { background: var(--accent); color: var(--bg); }
+/* Forced colours (Windows High Contrast) drop the fill that marks the
+   pressed side of a toggle: mark it in the system's highlight colours */
+@media (forced-colors: active) {
+  .play-seg[aria-pressed="true"], .mode-seg[aria-pressed="true"] {
+    forced-color-adjust: none;
+    background: Highlight;
+    color: HighlightText;
+  }
+}
+@media (hover: hover) {
+  .play-seg:not([aria-pressed="true"]):hover { color: var(--text); }
+}
+.unlimited-clock {
+  margin-top: 0.4rem;
+  color: var(--text);
+  font-size: 0.8rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.unlimited-clock.waiting { color: var(--dim); }
+@media (max-width: 430px) {
+  .play-toggle, .unlimited-clock { margin-top: 0.22rem; }
+  .play-seg { padding: 0.08rem 0.5rem; font-size: 0.75rem; }
+}
+/* the tiniest phones: the navigator and the toggle still share one row, so
+   an unsolved older puzzle's keyboard stays above the fold */
+@media (max-width: 340px) {
+  .nav-row { column-gap: 0.35rem; }
+  .nav-btn { padding-left: 0.4rem; padding-right: 0.4rem; }
+  .play-seg { padding-left: 0.35rem; padding-right: 0.35rem; font-size: 0.7rem; letter-spacing: 0.02em; }
+}
+
+/* In Unlimited the message area always holds two lines, so the reveal of the
+   puzzle just played shows in full (the longest, at 320 px, takes two) and
+   the keyboard below never moves while the next puzzle is typed */
+.message.in-unlimited {
+  min-height: 2.5em;
+  font-size: 0.9rem;
+  line-height: 1.25;
+}
+/* Unlimited's totals in Stats & history: a session's length fits its tile */
+.unlimited-tiles .stat-val { font-size: 1.2rem; line-height: 1.375; }
+
+/* Entering or leaving Unlimited (unlimited.js, starTransition): the two
+   views' snapshots swap inside an eight-pointed star that grows from the
+   screen's centre (or shrinks back to it); no fade. The star's thick border
+   is the image pair's background, showing in the gap between the inside's
+   edge and the outside's. */
+html[data-star]::view-transition-old(root),
+html[data-star]::view-transition-new(root) { animation: none; mix-blend-mode: normal; }
+html[data-star]::view-transition-image-pair(root) { background: var(--present); }
+
 /* ============ ABC board (the whole name on one line, word-spaced) ============ */
 
 /* ABC needs more width than ID's 8-tile board (names run to ~25 tiles), so its
@@ -955,7 +1042,11 @@ body > .hub-mark {
     calc((min(100vw - 1.5rem, 60rem) - (var(--abc-cols) - 1) * var(--tile-gap))
       / (var(--abc-cols) - 0.6 * var(--abc-fixed, 0) + 0.5 * var(--abc-wgaps))),
     3rem);
-  align-items: center;
+  /* rows centre by their auto margins, which drop to 0 when a long name is
+     wider than the board: it then overflows to the right only, where the
+     scroll reaches (centred flex overflow would put its first tiles left
+     of the scroll origin, out of reach) */
+  align-items: flex-start;
   max-width: 100%;
   overflow-x: auto;
   overflow-y: hidden;
@@ -964,6 +1055,7 @@ body > .hub-mark {
   display: flex;
   flex-wrap: nowrap;               /* the name stays on one line */
   width: max-content;
+  margin-inline: auto;
   justify-content: center;
   /* between-word gap: half a tile more than between letters, so a word break
      reads as a space and never as a missing letter */

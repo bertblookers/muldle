@@ -378,6 +378,8 @@ let randomId = null;       // identifier overriding the daily answer (random-obj
                            // mode), written in the pool's format
 let answer = ANSWER;       // answer of the puzzle being played (padded)
 let viewDay = DAY;         // puzzle number in play: today's (DAY) or an archived one (< DAY)
+let unlimited = false;     // in Unlimited: a random object of today's pool, the
+                           // session and its puzzle saved by unlimited.js
 
 // start a fresh guess row; in hard mode every known-green tile (one a previous
 // guess already matched, blanks included) starts filled in and locked —
@@ -464,8 +466,13 @@ function readEntry(e, day) {
 
 // today's daily (and the random-practice object) live in muldle-v1, keyed on
 // DAY; an off-day puzzle browsed via the navigator goes to the archive store so
-// it never overwrites today's daily. Neither overwrites a foreign entry.
+// it never overwrites today's daily. Neither overwrites a foreign entry. An
+// Unlimited puzzle goes with its session (unlimited.js), touching neither.
 function saveState() {
+  if (unlimited) {
+    idUnlimited.savePuzzle({ id: displayName(answer), guesses, rejected });
+    return;
+  }
   const entry = { guesses, rejected, fmt: pool.fmt };
   if (randomId || viewDay === DAY) {
     if (foreignEntry(loadToday(), DAY)) return;
@@ -535,12 +542,15 @@ const idResults = MuldleStats.create({
   heading: "Stats & history — ID",
   alsoClear: [ARCHIVE_KEY, STORAGE_KEY],
   openPuzzle: day => { statsDialog.close(); goToPuzzle(day); },
+  extra: container => idUnlimited.renderStats(container, byCatalogue), // Unlimited's totals
+  onClear: () => { idUnlimited.clearStats(); updatePlayToggle(); },
 });
 
 // Snapshot the just-finished puzzle in view into the results store. Random
-// practice has no puzzle number, so it is never recorded (stays ephemeral).
+// practice and Unlimited have no puzzle number, so they are never recorded
+// here (practice stays ephemeral; Unlimited keeps totals of its own).
 function recordCurrentResult(solved) {
-  if (randomId) return;
+  if (randomId || unlimited) return;
   idResults.record(viewDay, {
     guesses: guesses.slice(),
     solved,
@@ -568,6 +578,38 @@ function migrateStaleDaily() {
     });
   } catch (e) { /* corrupt: nothing to migrate */ }
 }
+
+/* ============ practice weighting + Unlimited (unlimited.js) ============ */
+
+// What random practice and Unlimited draw from: today's era pool as one group
+// of every object (any object equally likely), or one group per catalogue (the
+// "Practice weighting" setting, byCatalogue: a catalogue first, each equally
+// likely, then any object that is a member of it, shown under its best-known
+// id, so a Caldwell draw is often shown as NGC).
+function practiceGroups(weighted) {
+  const p = poolForDay(DAY, FMT_CURRENT);
+  return weighted ? Object.values(p.members).map(ix => ix.map(i => p.ids[i])) : [p.ids];
+}
+
+// today's ID answer is a daily object no mode's Unlimited serves (ABC's
+// registers its own in abc.js)
+MuldleUnlimited.setDaily("id", [displayName(ANSWER, poolForDay(DAY, FMT_CURRENT))]);
+
+// ID mode's Unlimited: random objects of today's pool, one after another,
+// never a daily object of today (ID's answer, the object of ABC's name); open
+// once today's daily (or an older one, today) is solved. A best rate counts
+// from a 15-minute run: about 10 solves of ~1.5 minutes
+// (notes/unlimited-estimates.md §1, to recalibrate from real times).
+const idUnlimited = MuldleUnlimited.create({
+  mode: "id", today: DAY, minRunMs: 15 * 60000, maxGuesses: MAX_GUESSES,
+  solvedToday: () => { const e = idResults.load()[DAY]; return !!(e && e.playedOnDay && e.solved); },
+  groups: practiceGroups,
+  skip: id => MuldleUnlimited.isDaily(id),
+  labels: { any: "any object", weighted: "each catalogue equally" },
+  liveDay: todayIndex,
+  recheck: () => recheckUnlimited(),   // game.js's DOM part
+  onLost: ended => lostUnlimited(ended),
+});
 
 /* ============ scoring (standard Wordle rules) ============ */
 
@@ -768,7 +810,7 @@ muldle.view = muldle.view || { id: DAY, abc: DAY };
 // (random practice counts as started: it isn't a fresh daily). Also whether
 // the page was opened with a ?p=N link, read before any syncUrl drops it.
 muldle.started = muldle.started || {};
-muldle.started.id = () => guesses.length > 0 || !!randomId;
+muldle.started.id = () => guesses.length > 0 || !!randomId || unlimited;
 muldle.linked = new URLSearchParams(location.search).has("p");
 muldle.syncUrl = function () {
   try {
@@ -941,6 +983,16 @@ function showMessage(text, sticky = false, alsoKnownAs = null, others = []) {
   if (!sticky && text) {
     messageTimer = setTimeout(() => { messageEl.textContent = ""; }, 2500);
   }
+}
+
+// Unlimited's reveal of the puzzle just finished, above the next board, in
+// full: in Unlimited the message area always holds two lines (.in-unlimited,
+// set by updatePlayToggle), so the keyboard never moves under a tap; it stays
+// until the next message
+function showReveal(text) {
+  messageEl.classList.remove("reveal");
+  messageEl.textContent = text;
+  clearTimeout(messageTimer);
 }
 
 // "Other names: Swan Nebula, Checkmark Nebula." as a quieter second line of
@@ -1285,6 +1337,7 @@ const WIN_MESSAGES = ["Stellar!", "Supernova!", "Brilliant!", "Well spotted!", "
 // Locked greens are never under the cursor.
 function handleKey(k) {
   if (finished) return;
+  if (unlimited) idUnlimited.key(); // the stopwatch starts at the first key
   if (k === "Enter") { submitGuess(); return; }
   if (k === "Left") { const p = prevFreeTile(cursor); if (p >= 0) cursor = p; renderCurrentRow(); return; }
   if (k === "Right") { if (cursor < WORD_LEN) cursor = nextFreeTile(cursor + 1); renderCurrentRow(); return; }
@@ -1370,9 +1423,16 @@ function submitGuess() {
   guesses.push(guess);
   saveState();
 
+  // Unlimited: a finished puzzle goes into its totals and the next one loads
+  if (unlimited && (guess === answer || guesses.length >= MAX_GUESSES)) {
+    finishUnlimited(guess === answer);
+    return;
+  }
   if (guess === answer) {
     finished = true;
     recordCurrentResult(true);
+    // a numbered puzzle solved live (today's, or an older one) opens Unlimited today
+    if (!randomId) { idUnlimited.unlock(); updatePlayToggle(); }
     showMessage(`${WIN_MESSAGES[guesses.length - 1]} It was ${displayName(answer)}.`, true, commonName(answer), otherNames(answer));
     showObject(answer);
     showPostGame();
@@ -1404,31 +1464,34 @@ function rejectGuess(guess) {
 function isTextField(el) {
   return !!el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
 }
-// a focused link (or something inside one)
-function isLink(el) {
-  return !!el && !!el.closest && !!el.closest("a[href]");
+// a focused control (a link, a button, a fold's summary, or something inside
+// one): Enter and Space work it, never the board (abc.js has its own copy)
+function isControl(el) {
+  return !!el && !!el.closest && !!el.closest("a[href], button, summary");
 }
-// A link clicked with the mouse or a tap (a hint's type link, the hub mark,
-// a footer link) lets go of the focus, as the game's buttons do: else the
-// next Enter, typed for the board, would stop at the link (the guard below)
-// and the row would never submit. A link reached by keyboard keeps it
-// (Enter on a link clicks with detail 0). Page-wide, so ABC mode gets it too.
-function releaseLink() {
+// A control clicked with the mouse or a tap (a hint's type link, the hub
+// mark, a survey button, a fold) lets go of the focus: else the next Enter,
+// typed for the board, would stop at it (the guard below) and the row would
+// never submit. A control reached by keyboard keeps it (Enter or Space on it
+// clicks with detail 0). Page-wide, so ABC mode gets it too. Text fields keep
+// their focus.
+function releaseControl() {
   const a = document.activeElement;
-  if (isLink(a)) a.blur();
+  if (isControl(a)) a.blur();
 }
-document.addEventListener("click", (e) => { if (e.detail > 0) releaseLink(); }, true);
-document.addEventListener("auxclick", releaseLink, true);
-document.addEventListener("contextmenu", (e) => { if (e.button === 2) releaseLink(); }, true);
+document.addEventListener("click", (e) => { if (e.detail > 0) releaseControl(); }, true);
+document.addEventListener("auxclick", releaseControl, true);
+document.addEventListener("contextmenu", (e) => { if (e.button === 2) releaseControl(); }, true);
 
 document.addEventListener("keydown", (e) => {
   if (window.__muldleMode && window.__muldleMode !== "id") return; // ABC face active
   if (settingsDialog.open || statsDialog.open) return;
   if (e.ctrlKey || e.metaKey || e.altKey) return;
-  // Enter on a focused link (the hub mark is the first tab stop) only follows
-  // it; it never also submits the row. Game buttons and links blur after a
-  // mouse click (releaseLink), so this only stops a link reached by keyboard
-  if (e.key === "Enter" && isLink(e.target)) return;
+  // Enter or Space on a focused control (the hub mark is the first tab stop;
+  // the Daily | Unlimited toggle, the navigator) only works that control: it
+  // never also submits the row or starts Unlimited's stopwatch. Controls blur
+  // after a mouse click (releaseControl), so this only stops keyboard users
+  if ((e.key === "Enter" || e.key === " ") && isControl(e.target)) return;
   if (e.key === "Enter") { handleKey("Enter"); }
   else if (e.key === "Backspace") {
     // always ours outside a text field: a browser set to "Backspace = Back"
@@ -1453,12 +1516,15 @@ const backToDailyBtn = document.getElementById("back-to-daily");
 const hardModeToggle = document.getElementById("hard-mode-toggle");
 const byCatalogueRow = document.getElementById("by-catalogue-row");
 const byCatalogueToggle = document.getElementById("by-catalogue-toggle");
+const byKindRow = document.getElementById("by-kind-row"); // ABC's practice weighting
 const doneKeysToggle = document.getElementById("done-keys-toggle");
+const resetPuzzleBtn = document.getElementById("reset-puzzle");
+const resetRandomBtn = document.getElementById("reset-random");
 
 // preferences survive across days, unlike the per-day game state
 const SETTINGS_KEY = "muldle-settings-v1";
 let hardMode = true;      // default on
-let byCatalogue = false;  // random practice: each catalogue equally likely (ID only)
+let byCatalogue = false;  // random practice and Unlimited: each catalogue equally likely (ID)
 let doneKeys = true;      // completed keys dark green (both modes; display only)
 
 function loadSettings() {
@@ -1470,8 +1536,14 @@ function loadSettings() {
   } catch (e) { /* corrupt settings: keep defaults */ }
 }
 
+// written over what is stored, so ABC's own setting there (abcByKind) stays
 function saveSettings() {
-  try { localStorage.setItem(SETTINGS_KEY, JSON.stringify({ hardMode, byCatalogue, doneKeys })); } catch (e) { /* ignore */ }
+  let s = {};
+  try {
+    const v = JSON.parse(localStorage.getItem(SETTINGS_KEY));
+    if (v && typeof v === "object" && !Array.isArray(v)) s = v;
+  } catch (e) { /* corrupt: start over */ }
+  try { localStorage.setItem(SETTINGS_KEY, JSON.stringify({ ...s, hardMode, byCatalogue, doneKeys })); } catch (e) { /* ignore */ }
 }
 
 // both keyboards carry the done marks always; this class shows them
@@ -1492,6 +1564,8 @@ hardModeToggle.addEventListener("change", () => {
 byCatalogueToggle.addEventListener("change", () => {
   byCatalogue = byCatalogueToggle.checked;
   saveSettings();
+  // Unlimited keeps its totals per weighting, so a session has one: a new one starts
+  if (unlimited) restartUnlimited();
 });
 
 doneKeysToggle.addEventListener("change", () => {
@@ -1513,7 +1587,7 @@ function updateInfo() {
   // the puzzle number lives in the navigator, so the info line carries the
   // context (random / archive), the pool size — or, mid-game in hard mode, how
   // many identifiers are still legal — and the rejected-guess count
-  const ctx = randomId ? "Random object · " : viewDay !== DAY ? "Archive · " : "";
+  const ctx = unlimited ? "Unlimited · " : randomId ? "Random object · " : viewDay !== DAY ? "Archive · " : "";
   let size = `${pool.words.length} identifiers in play`;
   if (hardMode && !finished && guesses.length) {
     const n = legalCountNow();
@@ -1530,7 +1604,7 @@ function updateInfo() {
 }
 
 function updateNav() {
-  navEl.classList.toggle("hidden", !!randomId); // a random object has no number
+  navEl.classList.toggle("hidden", !!randomId || unlimited); // a random object has no number
   navNumEl.textContent = viewDay;
   navPrevBtn.disabled = viewDay <= 0;
   navNextBtn.disabled = viewDay >= DAY;   // clamp to <= today (spoiler-free)
@@ -1555,25 +1629,30 @@ function clearBoardUI() {
   }
 }
 
-// A random object of today's era for practice, never the current answer. Off:
-// any object of the pool. byCatalogue: one of the era's catalogues first (each
-// equally likely), then any object that is a member of it, shown under its
-// best-known id (so a Caldwell draw is often shown as NGC).
+// A random object of today's era for practice, never the current answer,
+// drawn as the practice weighting says (practiceGroups: any object, or a
+// catalogue first)
 function randomIdentifier() {
-  const p = poolForDay(DAY, FMT_CURRENT);
+  const groups = practiceGroups(byCatalogue);
   const pick = list => list[Math.floor(Math.random() * list.length)];
-  const cats = Object.keys(p.members);
   let id;
-  do {
-    id = p.ids[byCatalogue ? pick(p.members[pick(cats)]) : Math.floor(Math.random() * p.ids.length)];
-  } while (fullWord(id) === answer);
+  do { id = pick(pick(groups)); } while (fullWord(id) === answer);
   return id;
+}
+
+// Unlimited ends without the star when another puzzle is opened from
+// elsewhere (a history row, the settings' resets)
+function dropUnlimited() {
+  if (!unlimited) return;
+  idUnlimited.end();
+  unlimited = false;
 }
 
 // wipe the current puzzle's guesses and replay it fresh, in the current
 // format. Keeps the puzzle in play (random object, today's daily, or an
 // archived one via viewDay); newRandomId is in the current format.
 function startPuzzle(newRandomId, msg) {
+  dropUnlimited();
   randomId = newRandomId;
   // a random object has no puzzle number: snap back to today's slot so the URL
   // drops any archived ?p (otherwise a reload would re-enter the archive and
@@ -1592,6 +1671,7 @@ function startPuzzle(newRandomId, msg) {
   hidePostGame();
   updateInfo();
   updateNav();
+  updatePlayToggle();
   showMessage(msg);
   saveState();
   muldle.view.id = viewDay;
@@ -1631,6 +1711,7 @@ function setPuzzle(s) {
 // switch to puzzle <day> (today's daily or an archived one), loading its saved
 // progress. Leaves random-practice mode. day is clamped to [0, today].
 function goToPuzzle(day) {
+  dropUnlimited();
   day = Math.max(0, Math.min(DAY, day | 0));
   randomId = null;
   viewDay = day;
@@ -1645,15 +1726,179 @@ function goToPuzzle(day) {
   if (!finished) showMessage(day === DAY ? "" : `Puzzle #${day}`);
   updateInfo();
   updateNav();
+  updatePlayToggle();
   muldle.view.id = viewDay;
   muldle.syncUrl();
   saveState();
   settingsDialog.close();
 }
 
+/* ============ Unlimited: the Daily | Unlimited toggle (unlimited.js keeps
+   the session, its stopwatch and totals; the board is this file's) ============ */
+
+const playToggleEl = document.getElementById("play-toggle");
+const playSegs = playToggleEl.querySelectorAll(".play-seg");
+const clockEl = document.getElementById("unlimited-clock");
+let switching = false; // a star transition is on its way: one at a time
+
+// the toggle shows once Unlimited is open (today's daily solved), and says
+// which side is in play
+function updatePlayToggle() {
+  playToggleEl.hidden = !unlimited && !idUnlimited.gateOpen();
+  for (const b of playSegs) b.setAttribute("aria-pressed", String((b.dataset.play === "unlimited") === unlimited));
+  messageEl.classList.toggle("in-unlimited", unlimited); // two lines held for the reveal
+}
+
+// show Unlimited's puzzle of `id` (an id of today's pool), with any guesses
+// saved for it
+function showUnlimitedPuzzle(id, gs = [], rej = 0) {
+  randomId = null;
+  viewDay = DAY;
+  pool = poolForDay(DAY, FMT_CURRENT);
+  answer = fullWord(id);
+  guesses = gs;
+  rejected = rej;
+  finished = false;
+  buildKeyboard();
+  clearBoardUI();
+  hideObjectPanel();
+  hidePostGame();
+  guesses.forEach((g, r) => { renderGuessRow(r, g); renderHintRow(r, g); });
+  resetCurrentRow();
+  renderCurrentRow();
+  updateInfo();
+  updateNav();
+  updatePlayToggle();
+  muldle.view.id = DAY;
+  muldle.syncUrl();
+  saveState();
+}
+
+// an Unlimited puzzle is over: into the session's totals, and the next one
+// loads at once, the one just played named above it
+function finishUnlimited(won) {
+  const tries = guesses.length, was = displayName(answer), common = commonName(answer);
+  idUnlimited.finish(won, tries);
+  const text = (won ? `${WIN_MESSAGES[tries - 1]} It was ${was}` : `Out of guesses — it was ${was}`) +
+    (common ? ` (${common}).` : ".");
+  if (idUnlimited.stale()) { newDayInUnlimited(text); return; }
+  showUnlimitedPuzzle(idUnlimited.next());
+  showReveal(text);
+}
+
+// Midnight has passed in Unlimited: this page's day (its answers, pool and
+// daily objects) is over, so the session ends rather than draw on, and the
+// page asks for a reload (a reload finds the gate closed until today's daily
+// is solved)
+const NEW_DAY = "A new day has started: reload for today's puzzles.";
+function newDayInUnlimited(text = "") {
+  dropUnlimited();
+  showTodayView();
+  showMessage(text ? `${text} ${NEW_DAY}` : NEW_DAY, true);
+}
+
+// another mode registered its daily object: the puzzle shown can't be one
+// (only a session resumed before abc.js loaded could be: then the next)
+function recheckUnlimited() {
+  if (unlimited && idUnlimited.skips(displayName(answer))) showUnlimitedPuzzle(idUnlimited.next());
+}
+
+// another tab took the session over (or ended it): this page shows the
+// daily again and says which
+function lostUnlimited(ended) {
+  unlimited = false;
+  showTodayView();
+  showMessage(ended ? "Unlimited ended in another tab." : "Unlimited goes on in another tab.", true);
+}
+
+// a session saved by an earlier page: its puzzle comes back as it was (one
+// already over, a daily object, or none saved gives the next)
+function resumeUnlimited(saved) {
+  const p = poolForDay(DAY, FMT_CURRENT);
+  if (saved && typeof saved.id === "string" && p.index.has(fullWord(saved.id)) && !idUnlimited.skips(saved.id)) {
+    const gs = (Array.isArray(saved.guesses) ? saved.guesses : [])
+      .filter(g => typeof g === "string" && g.length === WORD_LEN && p.index.has(g));
+    if (!gs.includes(fullWord(saved.id)) && gs.length < MAX_GUESSES) {
+      showUnlimitedPuzzle(saved.id, gs, rejectedCount(saved.rejected));
+      return;
+    }
+  }
+  showUnlimitedPuzzle(idUnlimited.next());
+}
+
+// Daily -> Unlimited: the star grows from the centre with Unlimited inside
+// (a new session: a fresh seed, the stopwatch waiting for the first key)
+function enterUnlimited() {
+  if (idUnlimited.stale()) { updatePlayToggle(); showMessage(NEW_DAY, true); return; }
+  if (unlimited || switching || !idUnlimited.gateOpen()) return;
+  switching = true;
+  MuldleUnlimited.starTransition("in", () => {
+    switching = false;
+    idUnlimited.begin(byCatalogue, viewDay);
+    unlimited = true;
+    showUnlimitedPuzzle(idUnlimited.next());
+    showMessage("The stopwatch starts at your first key.");
+  });
+}
+
+// Unlimited -> Daily: the star shrinks back, the session ends, and the
+// puzzle that was in view before comes back (today's: the daily, or the
+// random practice object saved in muldle-v1)
+function leaveUnlimited() {
+  if (!unlimited || switching) return;
+  switching = true;
+  MuldleUnlimited.starTransition("out", () => {
+    switching = false;
+    const prev = idUnlimited.prev;
+    dropUnlimited();
+    if (prev !== null && prev !== DAY) { goToPuzzle(prev); return; }
+    showTodayView();
+  });
+}
+
+// today's slot as muldle-v1 has it: the daily, or the random practice object
+function showTodayView() {
+  viewDay = DAY;
+  const loaded = loadState();
+  setPuzzle(loaded);
+  randomId = loaded.randomId;
+  answer = randomId ? fullWord(randomId) : answerForDay(DAY, pool.fmt);
+  buildKeyboard();
+  clearBoardUI();
+  hideObjectPanel();
+  hidePostGame();
+  showMessage("");
+  renderPuzzleState();
+  updateInfo();
+  updateNav();
+  updatePlayToggle();
+  muldle.view.id = DAY;
+  muldle.syncUrl();
+}
+
+// the weighting changed in Unlimited: a new session under it (the puzzle in
+// play is dropped, uncounted)
+function restartUnlimited() {
+  if (idUnlimited.stale()) { newDayInUnlimited(); return; } // after midnight: no draw from yesterday's pool
+  idUnlimited.begin(byCatalogue, idUnlimited.prev);
+  showUnlimitedPuzzle(idUnlimited.next());
+  showMessage("A new Unlimited session, with the new practice weighting.");
+}
+
+for (const b of playSegs) {
+  b.addEventListener("click", () => {
+    b.blur(); // so a later Enter doesn't press it again
+    if (b.dataset.play === "unlimited") enterUnlimited(); else leaveUnlimited();
+  });
+}
+
 settingsBtn.addEventListener("click", () => {
   backToDailyBtn.hidden = !randomId;
-  byCatalogueRow.hidden = false; // ID mode only (abc.js hides it)
+  // Unlimited moves on by itself: no replaying a puzzle, no practice object
+  resetPuzzleBtn.hidden = unlimited;
+  resetRandomBtn.hidden = unlimited;
+  byCatalogueRow.hidden = false; // ID mode's weighting (abc.js shows its own)
+  byKindRow.hidden = true;
   settingsDialog.showModal();
 });
 // <dialog> refocuses the opener on close; blur it so Enter/space for the next
@@ -1683,7 +1928,11 @@ const statsContent = document.getElementById("stats-content");
 function openStats() { settingsDialog.close(); idResults.render(statsContent); statsDialog.showModal(); }
 document.getElementById("stats-button").addEventListener("click", openStats);
 document.getElementById("stats-close").addEventListener("click", () => statsDialog.close());
-statsDialog.addEventListener("close", () => setTimeout(() => { try { settingsBtn.blur(); } catch (e) { /* ignore */ } }, 0));
+// the dialog refocuses its opener on close (ID's gear, ABC's gear): let go of
+// it, so the next Enter reaches the board (isControl), in both modes
+statsDialog.addEventListener("close", () => setTimeout(() => {
+  try { if (isControl(document.activeElement)) document.activeElement.blur(); } catch (e) { /* ignore */ }
+}, 0));
 
 /* ============ post-game: emoji-grid share + next-puzzle countdown ============ */
 
@@ -1722,10 +1971,10 @@ shareBtn.addEventListener("click", () => {
 let countdownTimer = null;
 
 // milliseconds from now until the next local midnight (when the daily rolls)
+// (the end of the page's day, DAY: once midnight has passed it is due, and
+// the countdown asks for a reload instead of counting to the next midnight)
 function msToMidnight() {
-  const now = new Date();
-  const next = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
-  return next - now;
+  return new Date(EPOCH.y, EPOCH.m - 1, EPOCH.d + DAY + 1) - Date.now();
 }
 
 function fmtDuration(ms) {
@@ -1782,21 +2031,34 @@ MuldleStats.pruneFuture(RESULTS_KEY, DAY); // drop stale entries for impossible 
 MuldleStats.pruneFuture(ARCHIVE_KEY, DAY);
 migrateStaleDaily(); // rescue a finished daily from a past day before it's lost
 
-// initial puzzle: a ?p=<day> for the active mode opens that archived puzzle;
-// otherwise restore today's daily (or the random-practice object) from muldle-v1
+// initial puzzle: a ?p=<day> for the active mode opens that archived puzzle
+// (a stored Unlimited session stays as it is, see below); otherwise an
+// Unlimited session goes on if the gate still allows it, else today's daily
+// (or the random-practice object) comes back from muldle-v1
 const urlDay = readUrlDay();
-if (urlDay != null && urlDay !== DAY && activeModeOnLoad() === "id") {
-  viewDay = urlDay;
-  setPuzzle(loadViewState());
-  answer = answerForDay(viewDay, pool.fmt);
+const linkedHere = urlDay != null && urlDay !== DAY && activeModeOnLoad() === "id";
+// a ?p link opens its puzzle and leaves a stored session as it is (another
+// tab may be playing it; a later plain load resumes it)
+const resumed = linkedHere ? undefined : idUnlimited.restore();
+if (idUnlimited.on) {
+  unlimited = true;
+  resumeUnlimited(resumed);
 } else {
-  const loaded = loadState();
-  setPuzzle(loaded);
-  randomId = loaded.randomId;
-  answer = randomId ? fullWord(randomId) : answerForDay(DAY, pool.fmt);
+  if (linkedHere) {
+    viewDay = urlDay;
+    setPuzzle(loadViewState());
+    answer = answerForDay(viewDay, pool.fmt);
+  } else {
+    const loaded = loadState();
+    setPuzzle(loaded);
+    randomId = loaded.randomId;
+    answer = randomId ? fullWord(randomId) : answerForDay(DAY, pool.fmt);
+  }
+  muldle.view.id = viewDay;
+  buildKeyboard();
+  updateNav();
+  renderPuzzleState(); // replays rows, restores finished state, prefills the current row
+  updateInfo();        // after renderPuzzleState: the info line depends on `finished`
 }
-muldle.view.id = viewDay;
-buildKeyboard();
-updateNav();
-renderPuzzleState(); // replays rows, restores finished state, prefills the current row
-updateInfo();        // after renderPuzzleState: the info line depends on `finished`
+updatePlayToggle();
+idUnlimited.setClock(clockEl);

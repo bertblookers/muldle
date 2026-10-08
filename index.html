@@ -5,7 +5,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Muldle — Find the astronomical object name or identifier</title>
-<link rel="stylesheet" href="style.css?v=91c4c5d3a8">
+<link rel="stylesheet" href="style.css?v=8a978bc6b0">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 </head>
 <body>
@@ -55,10 +55,18 @@
     </div>
   </div>
   <p class="tagline">Find the astronomical object name or identifier.</p>
-  <div class="puzzle-nav" id="puzzle-nav" role="group" aria-label="Puzzle navigator">
-    <button type="button" id="nav-prev" class="nav-btn nav-step" aria-label="Previous puzzle">&laquo;</button>
-    <button type="button" id="nav-today" class="nav-btn nav-num" aria-label="Back to today's puzzle" title="Back to today's puzzle">Puzzle #<span id="nav-num-val">0</span></button>
-    <button type="button" id="nav-next" class="nav-btn nav-step" aria-label="Next puzzle">&raquo;</button>
+  <div class="nav-row">
+    <div class="puzzle-nav" id="puzzle-nav" role="group" aria-label="Puzzle navigator">
+      <button type="button" id="nav-prev" class="nav-btn nav-step" aria-label="Previous puzzle">&laquo;</button>
+      <button type="button" id="nav-today" class="nav-btn nav-num" aria-label="Back to today's puzzle" title="Back to today's puzzle">Puzzle #<span id="nav-num-val">0</span></button>
+      <button type="button" id="nav-next" class="nav-btn nav-step" aria-label="Next puzzle">&raquo;</button>
+    </div>
+    <!-- once today's daily is solved (game.js, unlimited.js) -->
+    <div class="play-toggle" id="play-toggle" role="group" aria-label="Daily or Unlimited" hidden>
+      <button type="button" class="play-seg" data-play="daily" aria-pressed="true">Daily</button>
+      <button type="button" class="play-seg" data-play="unlimited" aria-pressed="false">Unlimited</button>
+    </div>
+    <span class="unlimited-clock" id="unlimited-clock" hidden></span>
   </div>
   <p class="puzzle-info" id="puzzle-info"></p>
 </header>
@@ -134,6 +142,11 @@
     each new row starts with them already filled; typing fills the
     remaining tiles and Backspace skips the greens. The line above the board
     shows how many identifiers could still be the answer.</p>
+    <p><strong>Unlimited</strong>: once you have solved today's puzzle, switch
+    from Daily to Unlimited (beside the puzzle number) and solve random
+    objects one after another, as many as you like. A stopwatch runs from
+    your first key, paused while the page is hidden. Unlimited keeps its own
+    stats; your daily streak and history stay as they are.</p>
     <p>Switch to <strong>ABC</strong> mode (toggle by the title) to guess the
     object's common name instead of its catalogue number.</p>
     <p>A new puzzle appears every day at midnight (local time).</p>
@@ -156,10 +169,18 @@
     </div>
   </div>
   <p class="tagline" id="abc-tagline">Name today's deep-sky object.</p>
-  <div class="puzzle-nav" id="abc-puzzle-nav" role="group" aria-label="Puzzle navigator">
-    <button type="button" id="abc-nav-prev" class="nav-btn nav-step" aria-label="Previous puzzle">&laquo;</button>
-    <button type="button" id="abc-nav-today" class="nav-btn nav-num" aria-label="Back to today's puzzle" title="Back to today's puzzle">Puzzle #<span id="abc-nav-num-val">0</span></button>
-    <button type="button" id="abc-nav-next" class="nav-btn nav-step" aria-label="Next puzzle">&raquo;</button>
+  <div class="nav-row">
+    <div class="puzzle-nav" id="abc-puzzle-nav" role="group" aria-label="Puzzle navigator">
+      <button type="button" id="abc-nav-prev" class="nav-btn nav-step" aria-label="Previous puzzle">&laquo;</button>
+      <button type="button" id="abc-nav-today" class="nav-btn nav-num" aria-label="Back to today's puzzle" title="Back to today's puzzle">Puzzle #<span id="abc-nav-num-val">0</span></button>
+      <button type="button" id="abc-nav-next" class="nav-btn nav-step" aria-label="Next puzzle">&raquo;</button>
+    </div>
+    <!-- once today's daily is solved (abc.js, unlimited.js) -->
+    <div class="play-toggle" id="abc-play-toggle" role="group" aria-label="Daily or Unlimited" hidden>
+      <button type="button" class="play-seg" data-play="daily" aria-pressed="true">Daily</button>
+      <button type="button" class="play-seg" data-play="unlimited" aria-pressed="false">Unlimited</button>
+    </div>
+    <span class="unlimited-clock" id="abc-unlimited-clock" hidden></span>
   </div>
   <p class="puzzle-info" id="abc-puzzle-info"></p>
 </header>
@@ -207,6 +228,11 @@
     greens stay put and are pre-filled, a letter can't go back to a spot where
     it was yellow or grey, and letter counts must fit what the colours
     showed.</p>
+    <p><strong>Unlimited</strong>: once you have solved today's puzzle, switch
+    from Daily to Unlimited (beside the puzzle number) and name random
+    objects one after another, as many as you like. A stopwatch runs from
+    your first key, paused while the page is hidden. Unlimited keeps its own
+    stats; your daily streak and history stay as they are.</p>
     <p>Switch back to <strong>ID</strong> mode (toggle by the title) to guess
     the catalogue number instead.</p>
     <p>A new puzzle appears every day at midnight (local time).</p>
@@ -239,7 +265,12 @@
   <label class="settings-toggle" id="by-catalogue-row">
     <input type="checkbox" id="by-catalogue-toggle">
     <span class="settings-toggle-text">Practice: each catalogue equally
-      <span>a random object picks one of the catalogues first, each equally likely, then any object in it</span></span>
+      <span>random practice and Unlimited pick one of the catalogues first, each equally likely, then any object in it</span></span>
+  </label>
+  <label class="settings-toggle" id="by-kind-row" hidden>
+    <input type="checkbox" id="by-kind-toggle">
+    <span class="settings-toggle-text">Practice: each kind equally
+      <span>random practice and Unlimited pick a kind first (deep-sky object, constellation, star, asterism, other object), each equally likely, then any name of it</span></span>
   </label>
   <button id="back-to-daily" class="settings-action" hidden>Back to today's puzzle
     <span>leave random mode (current guesses are discarded)</span></button>
@@ -261,17 +292,18 @@
   <a href="https://github.com/bertblookers/muldle/blob/main/ATTRIBUTION.md" target="_blank" rel="noopener">Data credits</a></p>
 </footer>
 
-<script src="data.js?v=91c4c5d3a8"></script>
-<script src="data_v2.js?v=91c4c5d3a8"></script>
-<script src="names.js?v=91c4c5d3a8"></script>
-<script src="names_v2.js?v=91c4c5d3a8"></script>
-<script src="names_v3.js?v=91c4c5d3a8"></script>
-<script src="aka.js?v=91c4c5d3a8"></script>
-<script src="surveys.js?v=91c4c5d3a8"></script>
-<script src="hints.js?v=91c4c5d3a8"></script>
-<script src="stats.js?v=91c4c5d3a8"></script>
-<script src="game.js?v=91c4c5d3a8"></script>
-<script src="abc.js?v=91c4c5d3a8"></script>
-<script src="start.js?v=91c4c5d3a8"></script>
+<script src="data.js?v=8a978bc6b0"></script>
+<script src="data_v2.js?v=8a978bc6b0"></script>
+<script src="names.js?v=8a978bc6b0"></script>
+<script src="names_v2.js?v=8a978bc6b0"></script>
+<script src="names_v3.js?v=8a978bc6b0"></script>
+<script src="aka.js?v=8a978bc6b0"></script>
+<script src="surveys.js?v=8a978bc6b0"></script>
+<script src="hints.js?v=8a978bc6b0"></script>
+<script src="stats.js?v=8a978bc6b0"></script>
+<script src="unlimited.js?v=8a978bc6b0"></script>
+<script src="game.js?v=8a978bc6b0"></script>
+<script src="abc.js?v=8a978bc6b0"></script>
+<script src="start.js?v=8a978bc6b0"></script>
 </body>
 </html>
