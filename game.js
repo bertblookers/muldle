@@ -1404,11 +1404,31 @@ function rejectGuess(guess) {
 function isTextField(el) {
   return !!el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
 }
+// a focused link (or something inside one)
+function isLink(el) {
+  return !!el && !!el.closest && !!el.closest("a[href]");
+}
+// A link clicked with the mouse or a tap (a hint's type link, the hub mark,
+// a footer link) lets go of the focus, as the game's buttons do: else the
+// next Enter, typed for the board, would stop at the link (the guard below)
+// and the row would never submit. A link reached by keyboard keeps it
+// (Enter on a link clicks with detail 0). Page-wide, so ABC mode gets it too.
+function releaseLink() {
+  const a = document.activeElement;
+  if (isLink(a)) a.blur();
+}
+document.addEventListener("click", (e) => { if (e.detail > 0) releaseLink(); }, true);
+document.addEventListener("auxclick", releaseLink, true);
+document.addEventListener("contextmenu", (e) => { if (e.button === 2) releaseLink(); }, true);
 
 document.addEventListener("keydown", (e) => {
   if (window.__muldleMode && window.__muldleMode !== "id") return; // ABC face active
   if (settingsDialog.open || statsDialog.open) return;
   if (e.ctrlKey || e.metaKey || e.altKey) return;
+  // Enter on a focused link (the hub mark is the first tab stop) only follows
+  // it; it never also submits the row. Game buttons and links blur after a
+  // mouse click (releaseLink), so this only stops a link reached by keyboard
+  if (e.key === "Enter" && isLink(e.target)) return;
   if (e.key === "Enter") { handleKey("Enter"); }
   else if (e.key === "Backspace") {
     // always ours outside a text field: a browser set to "Backspace = Back"

@@ -1047,11 +1047,19 @@ function submitGuess() {
 function isTextField(el) {
   return !!el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
 }
+// a focused link (or something inside one)
+function isLink(el) {
+  return !!el && !!el.closest && !!el.closest("a[href]");
+}
 
 document.addEventListener("keydown", (e) => {
   if (window.__muldleMode !== "abc") return;
   if (settingsDialog.open || statsDialog.open) return;
   if (e.ctrlKey || e.metaKey || e.altKey) return;
+  // Enter on a focused link (the hub mark is the first tab stop) only follows
+  // it; it never also submits the row (as in game.js, whose releaseLink makes
+  // a link clicked with the mouse let go, so this only stops keyboard users)
+  if (e.key === "Enter" && isLink(e.target)) return;
   if (e.key === "Enter") handleKey("Enter");
   else if (e.key === "Backspace") {
     // always ours outside a text field: a browser set to "Backspace = Back"

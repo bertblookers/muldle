@@ -5,13 +5,18 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Muldle — Find the astronomical object name or identifier</title>
-<link rel="stylesheet" href="style.css?v=e113a5c5b2">
+<link rel="stylesheet" href="style.css?v=91c4c5d3a8">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 </head>
 <body>
 
-<!-- Start screen (start.js): Play + What's new, shown on load for a fresh
-     puzzle only; while it is up the game below is hidden. -->
+<!-- The way back to the hub, top left on every screen (the family's mark,
+     ../uranias-mirror/notes/hub-navigation.md); phones show the star only. -->
+<a class="hub-mark" href="../" title="All the daily sky puzzles"><span class="hub-mark-name">Urania’s Mirror</span></a>
+
+<!-- Start screen (start.js): Play + What's new, On the horizon and Earlier
+     updates, shown on load for a fresh puzzle only; while it is up the game
+     below is hidden. -->
 <section id="start-screen" class="start-screen" hidden aria-labelledby="start-title">
   <h1 id="start-title">MULDLE <span class="mul-glyph" title="MUL 𒀯 — Sumerian for 'star'">𒀯</span></h1>
   <p class="tagline">Find the astronomical object name or identifier.</p>
@@ -19,7 +24,16 @@
   <button id="play-button" class="play-button" type="button">Play</button>
   <details id="whats-new" class="whats-new" hidden>
     <summary>What's new <span class="whats-new-date" id="whats-new-date"></span></summary>
+    <p class="news-title" id="whats-new-title"></p>
     <ul id="whats-new-list"></ul>
+  </details>
+  <details id="news-horizon" class="whats-new news-more" open hidden>
+    <summary>On the horizon</summary>
+    <div id="news-horizon-list"></div>
+  </details>
+  <details id="news-earlier" class="whats-new news-more" hidden>
+    <summary>Earlier updates</summary>
+    <div id="news-earlier-list"></div>
   </details>
 </section>
 
@@ -68,6 +82,7 @@
     <div id="post-game-stats" class="post-game-stats"></div>
     <button id="share-button" class="share-button" type="button">Share result</button>
     <p id="countdown" class="countdown" aria-live="off"></p>
+    <p class="more-games">More daily sky puzzles: <a href="../retractle/">Retractle</a> · all of <a href="../">Urania’s Mirror</a></p>
   </div>
 
   <div id="keyboard" class="keyboard"></div>
@@ -167,6 +182,7 @@
     <div id="abc-post-game-stats" class="post-game-stats"></div>
     <button id="abc-share-button" class="share-button" type="button">Share result</button>
     <p id="abc-countdown" class="countdown" aria-live="off"></p>
+    <p class="more-games">More daily sky puzzles: <a href="../retractle/">Retractle</a> · all of <a href="../">Urania’s Mirror</a></p>
   </div>
 
   <div id="abc-keyboard" class="keyboard"></div>
@@ -245,17 +261,17 @@
   <a href="https://github.com/bertblookers/muldle/blob/main/ATTRIBUTION.md" target="_blank" rel="noopener">Data credits</a></p>
 </footer>
 
-<script src="data.js?v=e113a5c5b2"></script>
-<script src="data_v2.js?v=e113a5c5b2"></script>
-<script src="names.js?v=e113a5c5b2"></script>
-<script src="names_v2.js?v=e113a5c5b2"></script>
-<script src="names_v3.js?v=e113a5c5b2"></script>
-<script src="aka.js?v=e113a5c5b2"></script>
-<script src="surveys.js?v=e113a5c5b2"></script>
-<script src="hints.js?v=e113a5c5b2"></script>
-<script src="stats.js?v=e113a5c5b2"></script>
-<script src="game.js?v=e113a5c5b2"></script>
-<script src="abc.js?v=e113a5c5b2"></script>
-<script src="start.js?v=e113a5c5b2"></script>
+<script src="data.js?v=91c4c5d3a8"></script>
+<script src="data_v2.js?v=91c4c5d3a8"></script>
+<script src="names.js?v=91c4c5d3a8"></script>
+<script src="names_v2.js?v=91c4c5d3a8"></script>
+<script src="names_v3.js?v=91c4c5d3a8"></script>
+<script src="aka.js?v=91c4c5d3a8"></script>
+<script src="surveys.js?v=91c4c5d3a8"></script>
+<script src="hints.js?v=91c4c5d3a8"></script>
+<script src="stats.js?v=91c4c5d3a8"></script>
+<script src="game.js?v=91c4c5d3a8"></script>
+<script src="abc.js?v=91c4c5d3a8"></script>
+<script src="start.js?v=91c4c5d3a8"></script>
 </body>
 </html>
