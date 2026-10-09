@@ -5,7 +5,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Muldle — Find the astronomical object name or identifier</title>
-<link rel="stylesheet" href="style.css?v=f17f05dd1e">
+<link rel="stylesheet" href="style.css?v=21dbddb1ad">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 </head>
 <body>
@@ -63,7 +63,7 @@
       <button type="button" id="nav-today" class="nav-btn nav-num" aria-label="Back to today's puzzle" title="Back to today's puzzle">Puzzle #<span id="nav-num-val">0</span></button>
       <button type="button" id="nav-next" class="nav-btn nav-step" aria-label="Next puzzle">&raquo;</button>
     </div>
-    <!-- once today's daily is solved (game.js, unlimited.js) -->
+    <!-- once today's daily is finished, won or lost (game.js, unlimited.js) -->
     <div class="play-toggle" id="play-toggle" role="group" aria-label="Daily or Unlimited" hidden>
       <button type="button" class="play-seg" data-play="daily" aria-pressed="true">Daily</button>
       <button type="button" class="play-seg" data-play="unlimited" aria-pressed="false">Unlimited</button>
@@ -86,7 +86,12 @@
     </aside>
   </div>
 
-  <div id="message" class="message" role="status"></div>
+  <!-- the message and the keyboard, pinned to the bottom together on a short
+       screen while a puzzle is in play (style.css, Backlog #25) -->
+  <div id="dock" class="dock">
+    <div id="message" class="message" role="status"></div>
+    <div id="keyboard" class="keyboard"></div>
+  </div>
 
   <div id="post-game" class="post-game" hidden>
     <div id="post-game-stats" class="post-game-stats"></div>
@@ -94,8 +99,6 @@
     <p id="countdown" class="countdown" aria-live="off"></p>
     <p class="more-games">More daily sky puzzles: <a href="../retractle/">Retractle</a> · all of <a href="../">Urania’s Mirror</a></p>
   </div>
-
-  <div id="keyboard" class="keyboard"></div>
 
   <details class="help">
     <summary>How to play</summary>
@@ -144,9 +147,9 @@
     each new row starts with them already filled; typing fills the
     remaining tiles and Backspace skips the greens. The line above the board
     shows how many identifiers could still be the answer.</p>
-    <p><strong>Unlimited</strong>: once you have solved today's puzzle, switch
-    from Daily to Unlimited (beside the puzzle number) and solve random
-    objects one after another, as many as you like. A stopwatch runs from
+    <p><strong>Unlimited</strong>: once you have finished today's puzzle, won
+    or lost, switch from Daily to Unlimited (beside the puzzle number) and
+    solve random objects one after another, as many as you like. A stopwatch runs from
     your first key, paused while the page is hidden. Unlimited keeps its own
     stats; your daily streak and history stay as they are.</p>
     <p>Switch to <strong>ABC</strong> mode (toggle by the title) to guess the
@@ -178,7 +181,7 @@
       <button type="button" id="abc-nav-today" class="nav-btn nav-num" aria-label="Back to today's puzzle" title="Back to today's puzzle">Puzzle #<span id="abc-nav-num-val">0</span></button>
       <button type="button" id="abc-nav-next" class="nav-btn nav-step" aria-label="Next puzzle">&raquo;</button>
     </div>
-    <!-- once today's daily is solved (abc.js, unlimited.js) -->
+    <!-- once today's daily is finished, won or lost (abc.js, unlimited.js) -->
     <div class="play-toggle" id="abc-play-toggle" role="group" aria-label="Daily or Unlimited" hidden>
       <button type="button" class="play-seg" data-play="daily" aria-pressed="true">Daily</button>
       <button type="button" class="play-seg" data-play="unlimited" aria-pressed="false">Unlimited</button>
@@ -200,7 +203,12 @@
     </aside>
   </div>
 
-  <div id="abc-message" class="message" role="status"></div>
+  <!-- the message and the keyboard, pinned to the bottom together on a short
+       screen while a puzzle is in play (style.css, Backlog #25) -->
+  <div id="abc-dock" class="dock">
+    <div id="abc-message" class="message" role="status"></div>
+    <div id="abc-keyboard" class="keyboard"></div>
+  </div>
 
   <div id="abc-post-game" class="post-game" hidden>
     <div id="abc-post-game-stats" class="post-game-stats"></div>
@@ -208,8 +216,6 @@
     <p id="abc-countdown" class="countdown" aria-live="off"></p>
     <p class="more-games">More daily sky puzzles: <a href="../retractle/">Retractle</a> · all of <a href="../">Urania’s Mirror</a></p>
   </div>
-
-  <div id="abc-keyboard" class="keyboard"></div>
 
   <details class="help">
     <summary>How to play</summary>
@@ -231,9 +237,9 @@
     greens stay put and are pre-filled, a letter can't go back to a spot where
     it was yellow or grey, and letter counts must fit what the colours
     showed.</p>
-    <p><strong>Unlimited</strong>: once you have solved today's puzzle, switch
-    from Daily to Unlimited (beside the puzzle number) and name random
-    objects one after another, as many as you like. A stopwatch runs from
+    <p><strong>Unlimited</strong>: once you have finished today's puzzle, won
+    or lost, switch from Daily to Unlimited (beside the puzzle number) and
+    name random objects one after another, as many as you like. A stopwatch runs from
     your first key, paused while the page is hidden. Unlimited keeps its own
     stats; your daily streak and history stay as they are.</p>
     <p>Switch back to <strong>ID</strong> mode (toggle by the title) to guess
@@ -268,8 +274,8 @@
 
 <main>
   <div id="omni-closed" class="omni-closed">
-    <p class="omni-closed-lead">OMNI opens once you've solved today's ID or ABC puzzle.</p>
-    <p>Then any identifier or name in the game can be the answer, from M31 to
+    <p class="omni-closed-lead">OMNI opens once you've finished today's ID or ABC puzzle.</p>
+    <p class="omni-closed-about">Then any identifier or name in the game can be the answer, from M31 to
     the Orion Nebula and Sirius: one random puzzle after another. Mini plays
     the short ones.</p>
   </div>
@@ -298,8 +304,8 @@
     Muldle: an id from any of its catalogues (<code>M31</code>,
     <code>NGC224</code>, <code>Mel25</code>), a deep-sky object's name
     (<code>ORION NEBULA</code>) or a constellation, star, asterism or other
-    famous object (<code>SIRIUS</code>). It opens once you've solved today's
-    ID or ABC puzzle, and plays like Unlimited: one random puzzle after
+    famous object (<code>SIRIUS</code>). It opens once you've finished today's
+    ID or ABC puzzle, won or lost, and plays like Unlimited: one random puzzle after
     another, a stopwatch from your first key, stats of its own.</p>
     <p>Every guess must be an identifier or name of the game. An object's
     other ids and names are fine as guesses, but only the very one is the
@@ -375,20 +381,20 @@
   <a href="https://github.com/bertblookers/muldle/blob/main/ATTRIBUTION.md" target="_blank" rel="noopener">Data credits</a></p>
 </footer>
 
-<script src="data.js?v=f17f05dd1e"></script>
-<script src="data_v2.js?v=f17f05dd1e"></script>
-<script src="names.js?v=f17f05dd1e"></script>
-<script src="names_v2.js?v=f17f05dd1e"></script>
-<script src="names_v3.js?v=f17f05dd1e"></script>
-<script src="aka.js?v=f17f05dd1e"></script>
-<script src="surveys.js?v=f17f05dd1e"></script>
-<script src="hints.js?v=f17f05dd1e"></script>
-<script src="stats.js?v=f17f05dd1e"></script>
-<script src="unlimited.js?v=f17f05dd1e"></script>
-<script src="game.js?v=f17f05dd1e"></script>
-<script src="abc.js?v=f17f05dd1e"></script>
-<script src="omni.js?v=f17f05dd1e"></script>
-<script src="flip.js?v=f17f05dd1e"></script>
-<script src="start.js?v=f17f05dd1e"></script>
+<script src="data.js?v=21dbddb1ad"></script>
+<script src="data_v2.js?v=21dbddb1ad"></script>
+<script src="names.js?v=21dbddb1ad"></script>
+<script src="names_v2.js?v=21dbddb1ad"></script>
+<script src="names_v3.js?v=21dbddb1ad"></script>
+<script src="aka.js?v=21dbddb1ad"></script>
+<script src="surveys.js?v=21dbddb1ad"></script>
+<script src="hints.js?v=21dbddb1ad"></script>
+<script src="stats.js?v=21dbddb1ad"></script>
+<script src="unlimited.js?v=21dbddb1ad"></script>
+<script src="game.js?v=21dbddb1ad"></script>
+<script src="abc.js?v=21dbddb1ad"></script>
+<script src="omni.js?v=21dbddb1ad"></script>
+<script src="flip.js?v=21dbddb1ad"></script>
+<script src="start.js?v=21dbddb1ad"></script>
 </body>
 </html>

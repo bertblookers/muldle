@@ -36,9 +36,9 @@ Toggle by the title between two modes, each with its own daily puzzle:
 - **ABC** — guess the object's well-known common name (e.g. `ORION NEBULA`) as
   a Wordle over its letters.
 - **OMNI** — any identifier or name in the game can be the answer, from `M31`
-  to `ORION NEBULA` and `SIRIUS`; it opens once you've solved today's ID or
-  ABC puzzle and plays one random puzzle after another. Spaces count;
-  apostrophes and hyphens are shown, never typed. **Mini**, beside it, plays
+  to `ORION NEBULA` and `SIRIUS`; it opens once you've finished today's ID or
+  ABC puzzle, won or lost, and plays one random puzzle after another. Spaces
+  count; apostrophes and hyphens are shown, never typed. **Mini**, beside it, plays
   only the short answers (up to 6 characters).
 
 ## More
@@ -51,11 +51,12 @@ Toggle by the title between two modes, each with its own daily puzzle:
   sent anywhere.
 - **Share** your result as an emoji grid, and watch a countdown to the next
   puzzle.
-- **Unlimited** — once you've solved today's puzzle, switch from Daily to
-  Unlimited (beside the puzzle number) and solve random puzzles one after
-  another, as many as you like, in either mode. A stopwatch runs from your
-  first key; Unlimited keeps stats of its own (longest session, best solves
-  per hour), and your daily streak is left alone.
+- **Unlimited** — once you've finished today's puzzle, won or lost, switch
+  from Daily to Unlimited (beside the puzzle number) and solve random puzzles
+  one after another, as many as you like, in either mode. A stopwatch runs
+  from your first key; Unlimited keeps stats of its own (longest session,
+  best solves per hour, average time per solve), and your daily streak is
+  left alone.
 
 ## Run locally
 

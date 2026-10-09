@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Unlimited, shared by ID mode (game.js) and ABC mode (abc.js). Once a mode's
-// daily is solved today (or an older daily, solved today through the
-// navigator), its Daily | Unlimited toggle shows. Unlimited plays random
+// daily is finished today, won or lost (or an older daily, finished today
+// through the navigator; user, 09-10-2026), its Daily | Unlimited toggle
+// shows. Unlimited plays random
 // puzzles of today's pool one after another: a finished one loads the next at
 // once. Each mode has its own Unlimited; its board and puzzle live in the
 // mode's file, and this module holds what both share:
-//   - the gate: today's daily solved (the mode's solvedToday), or a live solve
-//     of a numbered puzzle today (unlock);
+//   - the gate: today's daily finished (the mode's finishedToday), or a
+//     numbered puzzle finished live today (unlock);
 //   - the session: a fresh random seed on every entry and its draw sequence
 //     (makeDrawer, following the practice weighting, never a daily object of
 //     today in either mode: setDaily, isDaily), and a stopwatch that
@@ -206,7 +207,8 @@ const PAGE = freshSeed().toString(36);
 // today        the mode's puzzle number of today
 // minRunMs     a run counts for the best rate from this long on
 // maxGuesses   rows per puzzle (the distribution's length)
-// solvedToday  () => true once today's daily is solved (the results store)
+// finishedToday  () => true once today's daily is finished, won or lost
+//              (the results store)
 // groups       (weighted) => arrays of items to draw from (practice weighting)
 // skip         (item) => true for an item never to draw (a daily object,
 //              isDaily)
@@ -218,7 +220,7 @@ const PAGE = freshSeed().toString(36);
 // onLost       optional (ended) => void: another tab took this session over
 //              (ended false) or ended it (ended true); it is gone here, and
 //              the mode shows its daily
-function create({ mode, face = mode, title = "Unlimited", today, minRunMs, maxGuesses, solvedToday, groups, skip, labels,
+function create({ mode, face = mode, title = "Unlimited", today, minRunMs, maxGuesses, finishedToday, groups, skip, labels,
   liveDay, recheck, onLost }) {
   let live = null;    // the session while this mode is in Unlimited (also stored)
   let drawer = null;  // its draw sequence
@@ -318,15 +320,18 @@ function create({ mode, face = mode, title = "Unlimited", today, minRunMs, maxGu
     gateOpen() {
       if (ctl.stale()) return false; // a new day: this page's daily is over
       const u = stored().unlocked;
-      return !!(u && u[mode] === today) || !!solvedToday();
+      return !!(u && u[mode] === today) || !!finishedToday();
     },
     // midnight has passed since the page loaded: its day, answers and pool
     // are yesterday's
     stale() { return !!liveDay && liveDay() !== today; },
     // whether an item is one the draws never serve (a daily object)
     skips(item) { return !!skip(item); },
-    // a numbered puzzle was just solved live: Unlimited is open today
+    // a numbered puzzle was just finished live, won or lost: Unlimited is
+    // open today. A page past midnight writes nothing: its day is yesterday,
+    // and a fresh tab's unlock of today stays (release 2.1's review, A2)
     unlock() {
+      if (ctl.stale()) return;
       const s = stored();
       s.unlocked = Object.assign({}, s.unlocked, { [mode]: today });
       writeJSON(STATE_KEY, s);
@@ -468,12 +473,14 @@ function create({ mode, face = mode, title = "Unlimited", today, minRunMs, maxGu
           MuldleStats.statTile("Win %", t.played ? Math.round((100 * t.won) / t.played) : 0),
           MuldleStats.statTile("Longest", t.longestMs ? fmtClock(t.longestMs) : "–"),
           MuldleStats.statTile("Best / hour", t.bestRate ? t.bestRate.toFixed(1) : "–"),
+          MuldleStats.statTile("Avg / solve", t.timedSolves ? fmtClock(t.timedMs / t.timedSolves) : "–"),
         );
         container.append(h, tiles, MuldleStats.distBlock(t.dist));
       }
       const note = document.createElement("p");
       note.className = "stats-note unlimited-note";
-      note.textContent = `Best / hour: your most solves per hour over a run of at least ${Math.round(minRunMs / 60000)} minutes.`;
+      note.textContent = `Best / hour: your most solves per hour over a run of at least ${Math.round(minRunMs / 60000)} minutes. ` +
+        "Avg / solve: your stopwatch time divided by your solves, the time of puzzles you lost included.";
       container.appendChild(note);
     },
   };
@@ -488,9 +495,9 @@ function controller(mode) {
 
 // The time-spent totals (counted from release 2 on): per mode and weighting,
 // the stopwatch's time and the solves in it, so the average solve time is
-// timedMs / timedSolves. Shown only in the Developer section for now
-// (the user decides whether players see it); Q6's minimum runs recalibrate
-// from it.
+// timedMs / timedSolves: players see it in Stats & history ("Avg / solve",
+// user 09-10-2026), the Developer section lists every bucket; Q6's minimum
+// runs recalibrate from it.
 // A solve in Unlimited shows (user, 08-10-2026): the reveal line glows gold
 // for a moment and the clock's "n solved" pops (style.css, .celebrate). Only
 // a solve played now calls it, never a load or a resume; with reduced motion

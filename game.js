@@ -597,12 +597,13 @@ MuldleUnlimited.setDaily("id", [displayName(ANSWER, poolForDay(DAY, FMT_CURRENT)
 
 // ID mode's Unlimited: random objects of today's pool, one after another,
 // never a daily object of today (ID's answer, the object of ABC's name); open
-// once today's daily (or an older one, today) is solved. A best rate counts
+// once today's daily (or an older one, today) is finished. A best rate counts
 // from a 15-minute run: about 10 solves of ~1.5 minutes
 // (notes/unlimited-estimates.md §1, to recalibrate from real times).
 const idUnlimited = MuldleUnlimited.create({
   mode: "id", today: DAY, minRunMs: 15 * 60000, maxGuesses: MAX_GUESSES,
-  solvedToday: () => { const e = idResults.load()[DAY]; return !!(e && e.playedOnDay && e.solved); },
+  // a results entry is a finished puzzle, won or lost (user, 09-10-2026)
+  finishedToday: () => { const e = idResults.load()[DAY]; return !!(e && e.playedOnDay); },
   groups: practiceGroups,
   skip: id => MuldleUnlimited.isDaily(id),
   labels: { any: "any object", weighted: "each catalogue equally" },
@@ -1317,6 +1318,7 @@ function rowClicked(r) {
     showObject(word);
     // on stacked (phone) layouts the panel lives below the keyboard
     panelEl.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    keepPanelInView();
   } else if (finished) {
     showObject(answer);
   } else {
@@ -1428,7 +1430,8 @@ function submitGuess() {
   if (guess === answer) {
     finished = true;
     recordCurrentResult(true);
-    // a numbered puzzle solved live (today's, or an older one) opens Unlimited today
+    // a numbered puzzle finished live (today's, or an older one), won or
+    // lost, opens Unlimited today
     if (!randomId) { idUnlimited.unlock(); updatePlayToggle(); }
     showMessage(`${WIN_MESSAGES[guesses.length - 1]} It was ${displayName(answer)}.`, true, commonName(answer), otherNames(answer));
     showObject(answer);
@@ -1436,6 +1439,7 @@ function submitGuess() {
   } else if (guesses.length >= MAX_GUESSES) {
     finished = true;
     recordCurrentResult(false);
+    if (!randomId) { idUnlimited.unlock(); updatePlayToggle(); }
     showMessage(`Out of guesses — it was ${displayName(answer)}.`, true, commonName(answer), otherNames(answer));
     showObject(answer);
     showPostGame();
@@ -1443,6 +1447,7 @@ function submitGuess() {
   updateInfo();            // fewer identifiers stay legal with every new hint
   resetCurrentRow();       // prefill the next row's greens (no-op if finished)
   renderCurrentRow();
+  keepRowInView();
 }
 
 // a refused guess: shake the row and count it (shown in the info line and the
@@ -1730,6 +1735,8 @@ function goToPuzzle(day) {
   muldle.syncUrl();
   saveState();
   settingsDialog.close();
+  // the row being typed above the pinned dock (release 2.1's review, B1)
+  requestAnimationFrame(keepRowInView);
 }
 
 /* ============ Unlimited: the Daily | Unlimited toggle (unlimited.js keeps
@@ -1740,7 +1747,7 @@ const playSegs = playToggleEl.querySelectorAll(".play-seg");
 const clockEl = document.getElementById("unlimited-clock");
 let switching = false; // a star transition is on its way: one at a time
 
-// the toggle shows once Unlimited is open (today's daily solved), and says
+// the toggle shows once Unlimited is open (today's daily finished), and says
 // which side is in play
 function updatePlayToggle() {
   playToggleEl.hidden = !unlimited && !idUnlimited.gateOpen();
@@ -1771,6 +1778,8 @@ function showUnlimitedPuzzle(id, gs = [], rej = 0) {
   muldle.view.id = DAY;
   muldle.syncUrl();
   saveState();
+  // the row being typed above the pinned dock (release 2.1's review, B1)
+  requestAnimationFrame(keepRowInView);
 }
 
 // an Unlimited puzzle is over: into the session's totals, and the next one
@@ -1785,12 +1794,48 @@ function finishUnlimited(won) {
   showReveal(text);
   // a solve shows (user, 08-10-2026; none on a load or resume)
   if (won) MuldleUnlimited.celebrate(messageEl, clockEl);
+  keepRowInView();
 }
+
+// The pinned dock (a short screen, style.css, Backlog #25) covers the
+// board's lower rows: the row being typed scrolls into view above it, as in
+// OMNI. Nothing to do once the puzzle is over, on another face, mid-flip or
+// with the dock in the page's flow.
+function keepRowInView() {
+  if (finished || (window.__muldleMode && window.__muldleMode !== "id")) return;
+  const dock = document.getElementById("dock");
+  if (!dock || !dock.getClientRects().length || getComputedStyle(dock).position !== "sticky") return;
+  if (document.getElementById("flipper").classList.contains("flip-anim")) return;
+  const row = boardEl.children[Math.min(guesses.length, MAX_GUESSES - 1)];
+  if (!row) return;
+  const kb = dock.getBoundingClientRect(), rr = row.getBoundingClientRect();
+  const room = Math.min(kb.top, window.innerHeight - kb.height);
+  if (rr.bottom > room - 4) window.scrollBy(0, rr.bottom - room + 8);
+  else if (rr.top < 0) window.scrollBy(0, rr.top - 8);
+}
+window.addEventListener("load", () => setTimeout(keepRowInView, 0), { once: true });
+window.addEventListener("muldle:settled", ev => { if (ev.detail === "id") keepRowInView(); });
+
+// On a wide short screen the sky view sits beside the board, above the
+// pinned dock's place in the page, so the dock covers its lower part (the
+// caption, the lowest surveys): it scrolls clear of the dock, its top kept
+// on screen. Below the dock (stacked layouts) scrollIntoView does it
+// (release 2.1's review, B4).
+function keepPanelInView() {
+  const dock = document.getElementById("dock");
+  if (!dock || panelEl.hidden || !dock.getClientRects().length || getComputedStyle(dock).position !== "sticky") return;
+  const kb = dock.getBoundingClientRect(), pr = panelEl.getBoundingClientRect();
+  const room = Math.min(kb.top, window.innerHeight - kb.height);
+  if (pr.top >= kb.top || pr.bottom <= room) return;
+  const by = Math.min(pr.bottom - room + 8, pr.top - 8);
+  if (by > 0) window.scrollBy({ top: by, behavior: "smooth" });
+}
+
 
 // Midnight has passed in Unlimited: this page's day (its answers, pool and
 // daily objects) is over, so the session ends rather than draw on, and the
 // page asks for a reload (a reload finds the gate closed until today's daily
-// is solved)
+// is finished)
 const NEW_DAY = "A new day has started: reload for today's puzzles.";
 function newDayInUnlimited(text = "") {
   dropUnlimited();
@@ -1875,6 +1920,8 @@ function showTodayView() {
   updatePlayToggle();
   muldle.view.id = DAY;
   muldle.syncUrl();
+  // the row being typed above the pinned dock (release 2.1's review, B1)
+  requestAnimationFrame(keepRowInView);
 }
 
 // the weighting changed in Unlimited: a new session under it (the puzzle in

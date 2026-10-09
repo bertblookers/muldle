@@ -2,7 +2,7 @@
 // OMNI, the third mode (Backlog #17 Steps 2 and 3; the design and its
 // decisions: notes/omni-design.md): any identifier or name in the game can be
 // the answer. Unlimited only for now (a daily OMNI comes later, with an era of
-// its own): once today's ID or ABC daily is solved, OMNI plays random puzzles
+// its own): once today's ID or ABC daily is finished, OMNI plays random puzzles
 // one after another, and Mini, its other option, the short ones (at most 6
 // tiles and 3 digits). Its pool is built here at runtime from the data every
 // mode loads, so it has no era: a new catalogue or name joins at once.
@@ -192,11 +192,28 @@ function sameObject(g, a) {
   const theirs = namedObjects(a);
   return namedObjects(g).some(o => theirs.includes(o));
 }
+// The object a guess's hint row and sky view show: its own, or the answer's
+// when the guess is an other name two objects share and the second (`also`)
+// is the answer's object, so every cell agrees with its 0° (Lobster Nebula
+// against NGC6357 shows Scorpius and NGC 6357, not M17; release 2's last
+// check, R1, option b, user 09-10-2026).
+function shownObject(g, a) {
+  if (g.also && objectOf(g).key !== objectOf(a).key && g.also.some(o => namedObjects(a).includes(o))) return objectOf(a);
+  return objectOf(g);
+}
+// the ids a guess's caption names: the object in view first, then "also" the
+// others its word names
+function captionIds(e, o) {
+  const named = [e.primary].concat(e.also || []);
+  const first = named.includes(o.key) ? o.key : e.primary;
+  return { first, also: e.also ? named.filter(id => id !== first) : [] };
+}
 
 /* ---- the gate and the sessions (unlimited.js) ---- */
 
-// OMNI has no daily yet: it opens once today's ID or ABC daily is solved
-// (#17 Q2), by their own gates (a live solve of an older puzzle counts too)
+// OMNI has no daily yet: it opens once today's ID or ABC daily is finished,
+// won or lost (#17 Q2; user, 09-10-2026), by their own gates (an older
+// puzzle finished live today counts too)
 function gateOpen() {
   return ["id", "abc"].some(m => {
     const c = MuldleUnlimited.controller(m);
@@ -212,13 +229,13 @@ const OMNI_DAY = todayIndex(); // game.js: ID's numbers; OMNI's day is the same 
 // recalibrated from the time-spent totals later)
 const omniUnlimited = MuldleUnlimited.create({
   mode: "omni", face: "omni", today: OMNI_DAY, minRunMs: 30 * 60000, maxGuesses: MAX_GUESSES,
-  solvedToday: gateOpen, groups: w => groupsOf(pool().ANSWERS, w, false), skip,
+  finishedToday: gateOpen, groups: w => groupsOf(pool().ANSWERS, w, false), skip,
   labels: { any: "any entry", weighted: "each kind equally" },
   liveDay: todayIndex, recheck: () => recheck(), onLost: ended => lost(ended),
 });
 const miniUnlimited = MuldleUnlimited.create({
   mode: "mini", face: "omni", title: "Mini", today: OMNI_DAY, minRunMs: 10 * 60000, maxGuesses: MAX_GUESSES,
-  solvedToday: gateOpen, groups: w => groupsOf(pool().MINI_ANSWERS, w, true), skip,
+  finishedToday: gateOpen, groups: w => groupsOf(pool().MINI_ANSWERS, w, true), skip,
   labels: { any: "any entry", weighted: "each kind equally" },
   liveDay: todayIndex, recheck: () => recheck(), onLost: ended => lost(ended),
 });
@@ -551,7 +568,7 @@ function clearBoard() {
 
 const consName = c => CONSTELLATION_NAMES[c] || c;
 function renderHintRow(r, e) {
-  const cells = hintCells[r], g = objectOf(e), a = objectOf(entry);
+  const cells = hintCells[r], g = shownObject(e, entry), a = objectOf(entry);
   // constellation: the first (and how many more); green when one is shared
   const shared = g.cons.some(c => a.cons.includes(c));
   setHint(cells.con, g.cons.length ? consName(g.cons[0]) + (g.cons.length > 1 ? ` +${g.cons.length - 1}` : "") : "n/a",
@@ -626,16 +643,16 @@ function caption(e, o, otype) {
       "&Radius=2&Radius.unit=arcmin";
   link.textContent = e.text;
   captionEl.replaceChildren(role, " ", link);
-  const bits = [];
-  if (e.kind !== "name" && e.primary && !o.sky) bits.push(spacedId(e.primary));
-  if (e.also) bits.push("also " + e.also.map(spacedId).join(", "));
+  const bits = [], ids = captionIds(e, o);
+  if (e.kind !== "name" && e.primary && !o.sky) bits.push(spacedId(ids.first));
+  if (ids.also.length) bits.push("also " + ids.also.map(spacedId).join(", "));
   const what = o.sky ? o.sky.type || o.sky.kind : otype;
   if (what) bits.push(what);
   if (o.cons.length) bits.push(o.cons.map(consName).join(", "));
   for (const b of bits) captionEl.append(" · " + b);
 }
 function showObject(r) {
-  const e = guessEntries[r], o = objectOf(e);
+  const e = guessEntries[r], o = shownObject(e, entry);
   shownKey = r;
   for (let i = 0; i < boardEl.children.length; i++) boardEl.children[i].classList.toggle("viewing", i === r);
   if (panelEl.hidden) {
@@ -691,8 +708,15 @@ function rowClicked(r) {
 /* ---- messages and the info line ---- */
 
 let messageTimer = null;
-function showMessage(text, sticky = false) {
+function showMessage(text, sticky = false, spoken = "") {
   messageEl.textContent = text;
+  // a part only screen readers hear: a notice the page shows elsewhere
+  if (spoken) {
+    const s = document.createElement("span");
+    s.className = "sr-only";
+    s.textContent = text ? " " + spoken : spoken;
+    messageEl.append(s);
+  }
   clearTimeout(messageTimer);
   if (!sticky && text) messageTimer = setTimeout(() => { messageEl.textContent = ""; }, 2500);
 }
@@ -790,22 +814,31 @@ function showPuzzle(e, gs = [], rej = 0) {
   if (window.__muldleMode === "omni") requestAnimationFrame(keepRowInView);
 }
 
-// OMNI is closed (today's ID and ABC dailies unsolved, or a new day): a card
-// in place of the board
+// OMNI is closed (today's ID and ABC dailies unfinished, or a new day): a
+// card in place of the board
 function showClosed(text = "") {
   showing = false;
   entry = null;
   faceEl.classList.add("omni-closed-state");
   closedEl.hidden = false;
-  // the card's first line says how to play here: solve a daily, or (the gate
-  // open, the session gone to another tab) come back to OMNI
-  closedEl.querySelector(".omni-closed-lead").textContent = gateOpen() && !ctl().stale()
-    ? "OMNI is open: flip to another mode and back to carry on here."
-    : "OMNI opens once you've solved today's ID or ABC puzzle.";
+  // the card's first line says how to play here: after midnight, reload (the
+  // new-day notice, once: not in the message too); else finish a daily, or
+  // (the gate open, the session gone to another tab) come back to OMNI
+  const stale = ctl().stale(), open = !stale && gateOpen();
+  closedEl.querySelector(".omni-closed-lead").textContent = stale ? NEW_DAY
+    : open ? "OMNI is open: flip to another mode and back to carry on here."
+    : "OMNI opens once you've finished today's ID or ABC puzzle.";
+  // "Then any identifier ..." follows the gate's line only (no such line in
+  // a cached index.html from before 2.1: release 2.1's review, C2)
+  const about = closedEl.querySelector(".omni-closed-about");
+  if (about) about.hidden = stale || open;
   hideObjectPanel();
   updateInfo();
   updateToggle();
-  showMessage(text, true);
+  // the new-day notice is shown once, as the card's first line; screen
+  // readers hear it with the message (role=status), since text set as the
+  // card itself appears is not announced (release 2.1's review, B5)
+  showMessage(text, true, stale ? NEW_DAY : "");
 }
 
 // a session saved by an earlier page: its puzzle comes back as it was (one
@@ -831,7 +864,7 @@ const NEW_DAY = "A new day has started: reload for today's puzzles.";
 function beginSession(msg) {
   // after midnight the page's day is over: the session in play ends too
   // (counted), as ID's and ABC's do (release 2's review, R2-1)
-  if (ctl().stale()) { if (ctl().on) ctl().end(); showClosed(NEW_DAY); return; }
+  if (ctl().stale()) { if (ctl().on) ctl().end(); showClosed(); return; }
   if (!gateOpen()) { showClosed(); return; }
   ctl().begin(omniByKind(), null);
   showPuzzle(ctl().next());
@@ -851,7 +884,7 @@ function arrive() {
   if (ctl().on) {
     if (!showing) {
       // no draw from yesterday's pool after midnight (R2-4)
-      if (ctl().stale()) { ctl().end(); showClosed(NEW_DAY); return; }
+      if (ctl().stale()) { ctl().end(); showClosed(); return; }
       resume(deferred ? deferred.saved : null);
     } else requestAnimationFrame(keepRowInView);
     // on a load, again once the browser has put back its own scroll position
@@ -890,7 +923,7 @@ function setView(v) {
 function finish(won) {
   const tries = guesses.length, text = revealText(entry, won, tries);
   ctl().finish(won, tries);
-  if (ctl().stale()) { ctl().end(); showClosed(`${text} ${NEW_DAY}`); return; }
+  if (ctl().stale()) { ctl().end(); showClosed(text); return; }
   showPuzzle(ctl().next());
   messageEl.textContent = text; // the reveal, in full, until the next message
   clearTimeout(messageTimer);

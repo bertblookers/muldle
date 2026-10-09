@@ -257,14 +257,49 @@ main {
   .row.guessed:hover .tile { filter: brightness(1.2); }
 }
 
+/* ID's and ABC's message and keyboard as one dock (Backlog #25): on a screen
+   too short for the board, message and keyboard (a laptop's browser at
+   1366x657, a phone under 760 px tall), pinned to the bottom of the screen
+   as OMNI's (.omni-dock), the board scrolling under it, so Enter stays in
+   reach and a refusal in sight above the keys; game.js and abc.js keep the
+   row being typed above it. Sticky only holds it once its own place would be
+   below the screen; a finished puzzle (the keyboard hidden) leaves it in the
+   page's flow. */
+.dock {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+@media (max-height: 760px) {
+  .dock:not(:has(> .keyboard[hidden])) {
+    position: sticky;
+    bottom: 0;
+    z-index: 2;
+    /* the screen's width (the flip scene clips it): on a wide screen the
+       board area, hints and sky view beside the board, is wider than main */
+    width: 100vw;
+    margin-bottom: 0.4rem;
+    padding: 4px 0 calc(6px + env(safe-area-inset-bottom, 0px));
+    background: var(--bg);
+  }
+  .dock:not(:has(> .keyboard[hidden])) .message { margin-bottom: 0.3rem; }
+  .dock:not(:has(> .keyboard[hidden])) .keyboard { margin-bottom: 0; }
+}
+/* a phone held sideways: shorter keys leave room for the row being typed (as
+   OMNI's) */
+@media (max-height: 500px) {
+  .dock .keyboard { gap: 5px; }
+  .dock .key { height: 2.5rem; }
+}
+
 @media (max-width: 900px) {
   /* stack everything in main's column, keyboard right under the board so
      the game is playable without scrolling; hints and sky view below */
   .board-area { display: contents; }
   .board { order: 0; margin: 0.8rem 0 0; }
-  .message { order: 1; }
+  .dock { order: 1; }
   .post-game { order: 2; }
-  .keyboard { order: 3; }
   .hint-panel { order: 4; margin-bottom: 0.8rem; }
   .object-panel { order: 5; margin-bottom: 0.8rem; }
   .help { order: 6; }
@@ -329,6 +364,15 @@ main {
   margin-bottom: 0.4rem;
 }
 .message.reveal { font-size: 1.1rem; font-weight: 600; }
+/* text only screen readers hear (OMNI's new-day notice in its message) */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
 /* the reveal's quieter second line: the object's other established names */
 .message .other-names {
   display: block;
@@ -948,11 +992,20 @@ body > .hub-mark {
 .nav-step { font-size: 0.95rem; }
 .nav-num { letter-spacing: 0.04em; color: var(--text); } /* the number reads as active, never greyed */
 .nav-btn:disabled { color: var(--tile-border); cursor: default; }
+/* the group's overflow: hidden clips an outline drawn outside a button: draw
+   it inside (Retractle's B3, 09-10-2026), in the toggles' groups too, where
+   the pressed segment's accent fill takes a ring in the background colour
+   (release 2.1's review, B2) */
+.nav-btn:focus-visible, .play-seg:focus-visible, .mode-seg:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.play-seg[aria-pressed="true"]:focus-visible, .mode-seg[aria-pressed="true"]:focus-visible { outline-color: var(--bg); }
 @media (hover: hover) {
   .nav-btn:not(:disabled):hover { color: var(--text); } /* brighten only, no fill */
 }
 
-/* The navigator's row: « Puzzle #N » and, once today's daily is solved, the
+/* The navigator's row: « Puzzle #N » and, once today's daily is finished, the
    Daily | Unlimited toggle beside it; in Unlimited the navigator gives way to
    the session's stopwatch. Each part carries its own top margin, so a row
    with nothing shown takes no room. */
@@ -994,6 +1047,7 @@ body > .hub-mark {
     background: Highlight;
     color: HighlightText;
   }
+  .play-seg[aria-pressed="true"]:focus-visible, .mode-seg[aria-pressed="true"]:focus-visible { outline-color: HighlightText; }
 }
 @media (hover: hover) {
   .play-seg:not([aria-pressed="true"]):hover { color: var(--text); }
@@ -1049,6 +1103,13 @@ body > .hub-mark {
 
 /* Unlimited's totals in Stats & history: a session's length fits its tile */
 .unlimited-tiles .stat-val { font-size: 1.2rem; line-height: 1.375; }
+/* five tiles since the average per solve (user, 09-10-2026): below 380 px
+   they don't fit one row (the labels set each tile's least width), so three
+   then two */
+@media (max-width: 380px) {
+  .unlimited-tiles { flex-wrap: wrap; }
+  .unlimited-tiles .stat-tile { flex: 1 1 calc((100% - 0.8rem) / 3); }
+}
 
 /* Entering or leaving Unlimited (unlimited.js, starTransition): the two
    views' snapshots swap inside an eight-pointed star that grows from the

@@ -25,6 +25,8 @@
 // player's local date (a player west of the deployer may still be on the day
 // before), so it never shows a promised date. Player-facing words only, at
 // most 4-5 one-line items; an id never changes (muldle-seen-v1 stores it).
+// Every entry is accurate, clear, true, short and succinct, never quirky
+// (user, 09-10-2026).
 const UPDATES = [
   {
     id: "abc-v3",
@@ -39,14 +41,27 @@ const UPDATES = [
     ],
   },
   {
+    id: "any-daily",
+    date: { y: 2026, m: 10, d: 9 }, // the release day (exported 09-10-2026)
+    title: "Unlimited after any daily, average solve time",
+    items: [
+      "Unlimited and OMNI open once you've finished today's puzzle, won or lost.",
+      "Stats & history shows your average time per solve in Unlimited, OMNI and Mini.",
+      "On a short screen, ID's and ABC's keyboard stays at the bottom, so Enter is always in reach.",
+      "OMNI: a name of two objects, such as Lobster Nebula, gives its hints for the one that is the answer.",
+      "The « and » buttons show keyboard focus, and OMNI left open past midnight first says a new day has started.",
+    ],
+  },
+  {
     id: "omni",
     date: { y: 2026, m: 10, d: 9 }, // the release day (exported 09-10-2026)
     title: "OMNI and Mini",
     items: [
       "OMNI, a third mode: any identifier or name in the game can be the answer, from M31 to the Orion Nebula and Sirius. Flip to it by the title.",
       "It opens once you've solved today's ID or ABC puzzle, and plays like Unlimited: one random puzzle after another.",
-      "Spaces count, so even a guess like M31 shows how long the answer is.",
+      "Spaces and empty tiles count, so even a short guess like M31 shows how long the answer is.",
       "Mini, beside Unlimited in OMNI: short answers only (up to 6 characters), for quick rounds.",
+      "A solve in Unlimited, OMNI or Mini makes the reveal glow and the solved count pop.",
     ],
   },
   {
@@ -54,7 +69,7 @@ const UPDATES = [
     date: { y: 2026, m: 10, d: 8 }, // the release day (exported 08-10-2026)
     title: "Unlimited",
     items: [
-      "Solved today's puzzle? Switch from Daily to Unlimited, beside the puzzle number, and solve random puzzles one after another, as many as you like.",
+      "After solving today's puzzle, switch from Daily to Unlimited (beside the puzzle number) and solve random puzzles, as many as you like.",
       "A stopwatch runs from your first key; it pauses while the page is hidden.",
       "Unlimited keeps its own stats in Stats & history, including your longest session and your best solves per hour.",
       "Your daily streak and history stay as they are.",
@@ -66,7 +81,7 @@ const UPDATES = [
     title: "Urania's Mirror",
     items: [
       "Muldle is one of the daily sky puzzles of Urania's Mirror: the star top left takes you to all of them.",
-      "When a puzzle is done, a line points you to the others, starting with Retractle.",
+      "Under a finished puzzle, a line links the other games, starting with Retractle.",
     ],
   },
   {
@@ -74,7 +89,7 @@ const UPDATES = [
     date: { y: 2026, m: 10, d: 7 },
     title: "Backspace stays in the game",
     items: [
-      "In browsers set to go back a page on Backspace (Firefox can be), Backspace could take you off the game. Now it only ever clears tiles, in both modes.",
+      "In browsers set to go back a page on Backspace (Firefox can be), Backspace could leave the game. Now it only clears tiles, in both modes.",
     ],
   },
   {
@@ -104,7 +119,7 @@ const UPDATES = [
     title: "Completed keys",
     items: [
       "Once every copy of a letter or digit is found, its key turns dark green, in both modes.",
-      "Prefer to work it out yourself? Turn off \"Mark completed keys\" in the settings.",
+      "To work it out yourself, turn off \"Mark completed keys\" in the settings.",
     ],
   },
   {
@@ -196,7 +211,11 @@ const UPDATES = [
 // into UPDATES, dated, when it ships. Scheduled UPDATES (a date still to
 // come) show there by themselves, before these.
 const PLANNED = [
-  // (OMNI shipped; a planned "Daily OMNI" line waits for the user's yes)
+  {
+    id: "daily-omni", // approved by the user, 09-10-2026
+    title: "Daily OMNI",
+    items: ["A daily puzzle in OMNI, beside ID's and ABC's."],
+  },
 ];
 // the first update the start screen announced (it arrived with it): a
 // returning player who never saw one missed it and every later one

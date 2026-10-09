@@ -83,6 +83,19 @@ flipper.addEventListener("transitionend", (e) => {
   if (e.target === flipper && e.propertyName === "transform") legDone();
 });
 
+// a phone turned (or a window made wider or narrower) gives the pinned dock
+// another share of the screen: the face shown measures again, as when it
+// settles (release 2.1's review, B3). Width changes only: Chrome on Android
+// changes the height as its toolbar hides on a scroll, and a re-run then
+// would pull a player reading the hints back to the row.
+let lastWidth = window.innerWidth, resizeTimer = 0;
+window.addEventListener("resize", () => {
+  if (window.innerWidth === lastWidth) return;
+  lastWidth = window.innerWidth;
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => { if (!flipper.classList.contains("flip-anim")) settled(); }, 150);
+});
+
 // straight to a face: no animation
 function settle(m) {
   clearTimeout(legTimer);

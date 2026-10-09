@@ -571,12 +571,13 @@ MuldleUnlimited.setDaily("abc", objectsOf(TODAY));
 
 // ABC mode's Unlimited: random names of today's pool, one after another,
 // never a daily object of today (ABC's name, ID's answer); open once today's
-// daily (or an older one, today) is solved. A best rate counts from a
+// daily (or an older one, today) is finished. A best rate counts from a
 // 30-minute run: about 10 solves of ~3 minutes (notes/unlimited-estimates.md
 // §1, to recalibrate from real times).
 const abcUnlimited = MuldleUnlimited.create({
   mode: "abc", today: DAY, minRunMs: 30 * 60000, maxGuesses: MAX_GUESSES,
-  solvedToday: () => { const e = abcResults.load()[DAY]; return !!(e && e.playedOnDay && e.solved); },
+  // a results entry is a finished puzzle, won or lost (user, 09-10-2026)
+  finishedToday: () => { const e = abcResults.load()[DAY]; return !!(e && e.playedOnDay); },
   groups: abcPracticeGroups,
   skip: e => objectsOf(e).some(MuldleUnlimited.isDaily),
   labels: { any: "any name", weighted: "each kind equally" },
@@ -1016,6 +1017,7 @@ function rowClicked(r) {
   if (id !== shownId) {
     showObject(id);
     panelEl.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    keepPanelInView();
   } else if (finished) {
     showObject(activeId);
   } else {
@@ -1109,7 +1111,8 @@ function submitGuess() {
   if (guess === ANSWER) {
     finished = true;
     recordCurrentAbcResult(true);
-    // a numbered puzzle solved live (today's, or an older one) opens Unlimited today
+    // a numbered puzzle finished live (today's, or an older one), won or
+    // lost, opens Unlimited today
     if (!randomName) { abcUnlimited.unlock(); updatePlayToggle(); }
     showMessage(`${WIN_MESSAGES[guesses.length - 1]} It was ${theName(activeName, activeId)}.`, true, revealOthers());
     showObject(activeId);
@@ -1117,12 +1120,14 @@ function submitGuess() {
   } else if (guesses.length >= MAX_GUESSES) {
     finished = true;
     recordCurrentAbcResult(false);
+    if (!randomName) { abcUnlimited.unlock(); updatePlayToggle(); }
     showMessage(`Out of guesses — it was ${theName(activeName, activeId)}.`, true, revealOthers());
     showObject(activeId);
     showPostGame();
   }
   resetCurrent();
   renderCurrent();
+  keepRowInView();
 }
 
 // a focused text input (e.g. in the sky viewer) keeps its own arrow keys
@@ -1287,6 +1292,8 @@ function goToAbcPuzzle(day) {
   }
   saveState();
   settingsDialog.close();
+  // the row being typed above the pinned dock (release 2.1's review, B1)
+  requestAnimationFrame(keepRowInView);
 }
 
 // a random named object of today's era (practice), never the current answer,
@@ -1308,7 +1315,7 @@ const playSegs = playToggleEl.querySelectorAll(".play-seg");
 const clockEl = document.getElementById("abc-unlimited-clock");
 let switching = false; // a star transition is on its way: one at a time
 
-// the toggle shows once Unlimited is open (today's daily solved), and says
+// the toggle shows once Unlimited is open (today's daily finished), and says
 // which side is in play
 function updatePlayToggle() {
   playToggleEl.hidden = !unlimited && !abcUnlimited.gateOpen();
@@ -1338,6 +1345,8 @@ function showUnlimitedPuzzle(entry, gs = []) {
     if (window.__muldle.syncUrl) window.__muldle.syncUrl();
   }
   saveState();
+  // the row being typed above the pinned dock (release 2.1's review, B1)
+  requestAnimationFrame(keepRowInView);
 }
 
 // an Unlimited puzzle is over: into the session's totals, and the next one
@@ -1351,7 +1360,43 @@ function finishUnlimited(won) {
   showReveal(text);
   // a solve shows (user, 08-10-2026; none on a load or resume)
   if (won) MuldleUnlimited.celebrate(messageEl, clockEl);
+  keepRowInView();
 }
+
+// The pinned dock (a short screen, style.css, Backlog #25) covers the
+// board's lower rows: the row being typed scrolls into view above it, as in
+// OMNI. Nothing to do once the puzzle is over, on another face, mid-flip or
+// with the dock in the page's flow.
+function keepRowInView() {
+  if (finished || (window.__muldleMode && window.__muldleMode !== "abc")) return;
+  const dock = document.getElementById("abc-dock");
+  if (!dock || !dock.getClientRects().length || getComputedStyle(dock).position !== "sticky") return;
+  if (document.getElementById("flipper").classList.contains("flip-anim")) return;
+  const row = boardEl.children[Math.min(guesses.length, MAX_GUESSES - 1)];
+  if (!row) return;
+  const kb = dock.getBoundingClientRect(), rr = row.getBoundingClientRect();
+  const room = Math.min(kb.top, window.innerHeight - kb.height);
+  if (rr.bottom > room - 4) window.scrollBy(0, rr.bottom - room + 8);
+  else if (rr.top < 0) window.scrollBy(0, rr.top - 8);
+}
+window.addEventListener("load", () => setTimeout(keepRowInView, 0), { once: true });
+window.addEventListener("muldle:settled", ev => { if (ev.detail === "abc") keepRowInView(); });
+
+// On a wide short screen the sky view sits beside the board, above the
+// pinned dock's place in the page, so the dock covers its lower part (the
+// caption, the lowest surveys): it scrolls clear of the dock, its top kept
+// on screen. Below the dock (stacked layouts) scrollIntoView does it
+// (release 2.1's review, B4).
+function keepPanelInView() {
+  const dock = document.getElementById("abc-dock");
+  if (!dock || panelEl.hidden || !dock.getClientRects().length || getComputedStyle(dock).position !== "sticky") return;
+  const kb = dock.getBoundingClientRect(), pr = panelEl.getBoundingClientRect();
+  const room = Math.min(kb.top, window.innerHeight - kb.height);
+  if (pr.top >= kb.top || pr.bottom <= room) return;
+  const by = Math.min(pr.bottom - room + 8, pr.top - 8);
+  if (by > 0) window.scrollBy({ top: by, behavior: "smooth" });
+}
+
 
 // Midnight has passed in Unlimited: this page's day (its answers, pool and
 // daily objects) is over, so the session ends rather than draw on, and the
@@ -1439,6 +1484,8 @@ function showTodayView() {
     window.__muldle.view.abc = DAY;
     if (window.__muldle.syncUrl) window.__muldle.syncUrl();
   }
+  // the row being typed above the pinned dock (release 2.1's review, B1)
+  requestAnimationFrame(keepRowInView);
 }
 
 // the weighting changed in Unlimited: a new session under it (the puzzle in
