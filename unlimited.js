@@ -133,7 +133,8 @@ const count = v => (Number.isInteger(v) && v > 0 ? v : 0);
 function normTotals(t, maxGuesses) {
   t = t && typeof t === "object" ? t : {};
   const dist = Array.from({ length: maxGuesses }, (_, i) => count(Array.isArray(t.dist) ? t.dist[i] : 0));
-  return { played: count(t.played), won: count(t.won), dist, longestMs: nonNeg(t.longestMs), bestRate: nonNeg(t.bestRate) };
+  return { played: count(t.played), won: count(t.won), dist, longestMs: nonNeg(t.longestMs), bestRate: nonNeg(t.bestRate),
+    timedMs: nonNeg(t.timedMs), timedSolves: count(t.timedSolves) };
 }
 
 // a stored session, sanitised, or null if it isn't one
@@ -144,6 +145,9 @@ function normSession(s) {
     prev: Number.isInteger(s.prev) ? s.prev : null,
     puzzle: s.puzzle && typeof s.puzzle === "object" ? s.puzzle : null,
     ms: nonNeg(s.ms), started: s.started === true, solves: count(s.solves), lastT: nonNeg(s.lastT),
+    // time already counted in the time-spent total; a session saved before
+    // that total existed counts from where it was (its earlier time no)
+    timedAt: Number.isFinite(s.timedAt) && s.timedAt >= 0 ? s.timedAt : nonNeg(s.ms),
   };
 }
 
@@ -152,15 +156,23 @@ function normSession(s) {
 function visible() {
   return typeof document === "undefined" || document.visibilityState !== "hidden";
 }
-// the face showing (abc.js's flip sets window.__muldleMode; before it has run,
-// the saved preference)
+// the face a load shows: the one saved last time (muldle-mode-v1), except
+// that a ?p=N link opens on ID's face when OMNI was saved, OMNI having no
+// numbered puzzles (release 2's review, R2-2). flip.js shows it; game.js and
+// abc.js ask it before flip.js has run (which face takes the link).
+function faceOnLoad() {
+  let m = null;
+  try { m = localStorage.getItem(MODE_KEY); } catch (e) { /* ignore */ }
+  if (m === "abc" || m === "id") return m;
+  if (m !== "omni") return "id";
+  try { if (new URLSearchParams(location.search).has("p")) return "id"; } catch (e) { /* ignore */ }
+  return "omni";
+}
+// the face showing (flip.js sets window.__muldleMode; before it has run, the
+// face the load will show)
 function activeMode() {
   if (typeof window !== "undefined" && window.__muldleMode) return window.__muldleMode;
-  try {
-    const m = localStorage.getItem(MODE_KEY);
-    if (m === "abc" || m === "id") return m;
-  } catch (e) { /* ignore */ }
-  return "id";
+  return faceOnLoad();
 }
 
 const controllers = [];
@@ -188,7 +200,9 @@ const PAGE = freshSeed().toString(36);
 
 /* ---- one mode's Unlimited ---- */
 
-// mode         "id" | "abc"
+// mode         "id" | "abc" | "omni" | "mini": the session's key and stats
+// face         the face it plays on (default: mode; Mini's is OMNI's)
+// title        what Stats & history calls it (default "Unlimited")
 // today        the mode's puzzle number of today
 // minRunMs     a run counts for the best rate from this long on
 // maxGuesses   rows per puzzle (the distribution's length)
@@ -204,7 +218,8 @@ const PAGE = freshSeed().toString(36);
 // onLost       optional (ended) => void: another tab took this session over
 //              (ended false) or ended it (ended true); it is gone here, and
 //              the mode shows its daily
-function create({ mode, today, minRunMs, maxGuesses, solvedToday, groups, skip, labels, liveDay, recheck, onLost }) {
+function create({ mode, face = mode, title = "Unlimited", today, minRunMs, maxGuesses, solvedToday, groups, skip, labels,
+  liveDay, recheck, onLost }) {
   let live = null;    // the session while this mode is in Unlimited (also stored)
   let drawer = null;  // its draw sequence
   let since = null;   // Date.now() when the stopwatch last started running, else null
@@ -253,12 +268,15 @@ function create({ mode, today, minRunMs, maxGuesses, solvedToday, groups, skip, 
   }
   // a check of the session's time so far: its best rate since the last check
   // and its length go into the totals
+  // (and the time since the last check goes into the time-spent total)
   function check(before, after) {
-    const t = live.ms, rate = bestRate(live.lastT, t, before, after, minRunMs);
+    const t = live.ms, rate = bestRate(live.lastT, t, before, after, minRunMs), dt = Math.max(0, t - live.timedAt);
     live.lastT = t;
+    live.timedAt = t;
     return tot => {
       if (rate > tot.bestRate) tot.bestRate = rate;
       if (t > tot.longestMs) tot.longestMs = t;
+      tot.timedMs += dt;
     };
   }
 
@@ -275,7 +293,7 @@ function create({ mode, today, minRunMs, maxGuesses, solvedToday, groups, skip, 
   // run the stopwatch exactly while the session has started, the page is
   // visible and this mode's face shows; a pause checks the rate and saves
   function sync() {
-    const run = !!live && live.started && visible() && activeMode() === mode;
+    const run = !!live && live.started && visible() && activeMode() === face;
     if (run && since === null) {
       since = Date.now();
       if (clockEl && !timer) timer = setInterval(show, 1000);
@@ -291,6 +309,7 @@ function create({ mode, today, minRunMs, maxGuesses, solvedToday, groups, skip, 
 
   const ctl = {
     mode,
+    face,
     get on() { return !!live; },
     // the puzzle number to go back to on leaving
     get prev() { return live ? live.prev : null; },
@@ -317,6 +336,10 @@ function create({ mode, today, minRunMs, maxGuesses, solvedToday, groups, skip, 
     // no longer allows (another day) ends here, its time counted. undefined:
     // no session.
     restore() {
+      // a page past midnight leaves the store alone: the session there may be
+      // one a fresh tab plays today (the re-check's R2); the page shows the
+      // new day instead
+      if (ctl.stale()) return undefined;
       const raw = stored()[mode];
       if (raw === undefined) return undefined;
       live = normSession(raw);
@@ -331,7 +354,7 @@ function create({ mode, today, minRunMs, maxGuesses, solvedToday, groups, skip, 
     begin(weighted, prev) {
       if (live) ctl.end();
       live = { seed: freshSeed(), weighted: !!weighted, n: 0, prev: Number.isInteger(prev) ? prev : null,
-        puzzle: null, ms: 0, started: false, solves: 0, lastT: 0 };
+        puzzle: null, ms: 0, started: false, solves: 0, lastT: 0, timedAt: 0 };
       drawer = null;
       persist();
       sync();
@@ -369,6 +392,7 @@ function create({ mode, today, minRunMs, maxGuesses, solvedToday, groups, skip, 
         tot.played++;
         if (won) {
           tot.won++;
+          tot.timedSolves++;
           if (tries >= 1 && tries <= maxGuesses) tot.dist[tries - 1]++;
         }
         rec(tot);
@@ -436,7 +460,7 @@ function create({ mode, today, minRunMs, maxGuesses, solvedToday, groups, skip, 
       for (const { w, t } of blocks) {
         const h = document.createElement("h3");
         h.className = "unlimited-stats-head";
-        h.textContent = `Unlimited · ${labels[w ? "weighted" : "any"]}`;
+        h.textContent = `${title} · ${labels[w ? "weighted" : "any"]}`;
         const tiles = document.createElement("div");
         tiles.className = "stats-tiles unlimited-tiles";
         tiles.append(
@@ -455,6 +479,46 @@ function create({ mode, today, minRunMs, maxGuesses, solvedToday, groups, skip, 
   };
   controllers.push(ctl);
   return ctl;
+}
+
+// a mode's controller (OMNI's gate asks ID's and ABC's)
+function controller(mode) {
+  return controllers.find(c => c.mode === mode) || null;
+}
+
+// The time-spent totals (counted from release 2 on): per mode and weighting,
+// the stopwatch's time and the solves in it, so the average solve time is
+// timedMs / timedSolves. Shown only in the Developer section for now
+// (the user decides whether players see it); Q6's minimum runs recalibrate
+// from it.
+// A solve in Unlimited shows (user, 08-10-2026): the reveal line glows gold
+// for a moment and the clock's "n solved" pops (style.css, .celebrate). Only
+// a solve played now calls it, never a load or a resume; with reduced motion
+// the reveal shows without the animation, and no class waits for an end that
+// never comes (the re-check's R4). celebrations counts them (tests).
+let celebrations = 0;
+const celebrateEnds = new WeakMap(); // each element's one listener for its animation's end
+function celebrate(...els) {
+  celebrations++;
+  if (typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  for (const el of els) {
+    if (!el) continue;
+    el.classList.remove("celebrate");
+    void el.offsetWidth; // a solve right after another plays it again
+    el.classList.add("celebrate");
+    if (celebrateEnds.has(el)) continue;
+    // its own animation's end, not one bubbling up from inside it (nor the
+    // cancel a restart fires, which would take the new one's class away)
+    const done = ev => { if (ev.target === el) el.classList.remove("celebrate"); };
+    celebrateEnds.set(el, done);
+    el.addEventListener("animationend", done);
+  }
+}
+
+function averages() {
+  return Object.entries(readJSON(STATS_KEY))
+    .map(([bucket, t]) => ({ bucket, ms: nonNeg(t && t.timedMs), solves: count(t && t.timedSolves) }))
+    .filter(a => a.ms > 0 || a.solves > 0);
 }
 
 if (typeof document !== "undefined") {
@@ -564,5 +628,6 @@ function starTransition(dir, update) {
 }
 
 return { create, makeDrawer, bestRate, fmtClock, normTotals, normSession, starCorners, starFrames,
-  starTransition, starEngine, sync: syncAll, setDaily, isDaily, STATE_KEY, STATS_KEY };
+  starTransition, starEngine, sync: syncAll, setDaily, isDaily, controller, averages, faceOnLoad, celebrate,
+  get celebrations() { return celebrations; }, STATE_KEY, STATS_KEY };
 })();

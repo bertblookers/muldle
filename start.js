@@ -39,6 +39,17 @@ const UPDATES = [
     ],
   },
   {
+    id: "omni",
+    date: { y: 2026, m: 10, d: 9 }, // the release day (exported 09-10-2026)
+    title: "OMNI and Mini",
+    items: [
+      "OMNI, a third mode: any identifier or name in the game can be the answer, from M31 to the Orion Nebula and Sirius. Flip to it by the title.",
+      "It opens once you've solved today's ID or ABC puzzle, and plays like Unlimited: one random puzzle after another.",
+      "Spaces count, so even a guess like M31 shows how long the answer is.",
+      "Mini, beside Unlimited in OMNI: short answers only (up to 6 characters), for quick rounds.",
+    ],
+  },
+  {
     id: "unlimited",
     date: { y: 2026, m: 10, d: 8 }, // the release day (exported 08-10-2026)
     title: "Unlimited",
@@ -185,11 +196,7 @@ const UPDATES = [
 // into UPDATES, dated, when it ships. Scheduled UPDATES (a date still to
 // come) show there by themselves, before these.
 const PLANNED = [
-  {
-    id: "omni", // approved by the user 08-10-2026
-    title: "OMNI",
-    items: ["A third mode where any identifier or name in the game can be the answer."],
-  },
+  // (OMNI shipped; a planned "Daily OMNI" line waits for the user's yes)
 ];
 // the first update the start screen announced (it arrived with it): a
 // returning player who never saw one missed it and every later one
@@ -201,7 +208,7 @@ const sceneEl = document.getElementById("flip-scene");
 const playBtn = document.getElementById("play-button");
 
 const muldle = window.__muldle || {};
-const mode = window.__muldleMode === "abc" ? "abc" : "id";
+const mode = ["abc", "omni"].includes(window.__muldleMode) ? window.__muldleMode : "id";
 const started = muldle.started && muldle.started[mode] ? muldle.started[mode]() : true;
 // game.js reads ?p before the flip's syncUrl drops a ?p that names today
 const linked = !!muldle.linked;

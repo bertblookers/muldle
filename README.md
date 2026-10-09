@@ -35,6 +35,11 @@ Toggle by the title between two modes, each with its own daily puzzle:
 - **ID** — guess the catalogue identifier (the default, described above).
 - **ABC** — guess the object's well-known common name (e.g. `ORION NEBULA`) as
   a Wordle over its letters.
+- **OMNI** — any identifier or name in the game can be the answer, from `M31`
+  to `ORION NEBULA` and `SIRIUS`; it opens once you've solved today's ID or
+  ABC puzzle and plays one random puzzle after another. Spaces count;
+  apostrophes and hyphens are shown, never typed. **Mini**, beside it, plays
+  only the short answers (up to 6 characters).
 
 ## More
 

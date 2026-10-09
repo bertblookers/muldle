@@ -828,17 +828,26 @@ body > .hub-mark {
   justify-content: center;
   perspective: 2200px;
   perspective-origin: 50% 40%;
+  /* a leg about the horizontal axis (ABC <-> OMNI) swings the card's near
+     edge wider than the screen: a phone's browser would keep the page that
+     wide after the flip (release 2's review, R2-10). clip, unlike hidden,
+     makes no scroll container, so OMNI's pinned dock still sticks. */
+  overflow-x: clip;
 }
 #flipper {
   position: relative;        /* the preserve-3d element stays a plain block */
   width: 100%;
   transform-style: preserve-3d;
-  transition: transform 0.85s cubic-bezier(0.45, 0.05, 0.2, 1);
-  transform: rotateY(0deg);
+  /* one leg of the flip (flip.js sets --flip-ms: two legs, ID-OMNI, run at
+     double speed); the pose is always rotateY rotateX, so a leg turns one */
+  transition: transform var(--flip-ms, 0.85s) cubic-bezier(0.45, 0.05, 0.2, 1);
+  transform: rotateY(0deg) rotateX(0deg);
 }
 /* ID -> ABC: the left edge swings towards the viewer (positive rotateY);
    ABC -> ID replays the same transition in reverse */
-#flipper.flipped { transform: rotateY(180deg); }
+#flipper.flipped { transform: rotateY(180deg) rotateX(0deg); }
+/* ABC -> OMNI: a turn about the horizontal axis (OMNI -> ABC replays it) */
+#flipper.flipped.flipped-x { transform: rotateY(180deg) rotateX(180deg); }
 #flipper.no-anim { transition: none; }
 
 .face {
@@ -860,8 +869,10 @@ body > .hub-mark {
 .face.face-back { visibility: hidden; }
 /* during an animated flip, defer each face's show/hide to the flip's midpoint
    (0.85s / 2), i.e. when the card is edge-on and both faces are ~invisible */
-#flipper.flip-anim .face { transition-delay: 0.425s; }
+#flipper.flip-anim .face { transition-delay: calc(var(--flip-ms, 850ms) / 2); }
 #face-abc { transform: rotateY(180deg); }
+/* upright when the card shows rotateY(180) rotateX(180): its inverse */
+#face-omni { transform: rotateX(-180deg) rotateY(-180deg); }
 /* A sky view (Aladin) is a WebGL <canvas>. In Firefox a canvas inside a
    preserve-3d, rotated subtree is composited on its own layer and ignores the
    away face's visibility:hidden (and 3D transform), so its reticle/crosshair
@@ -892,6 +903,7 @@ body > .hub-mark {
 }
 .mode-seg {
   min-height: 24px; /* WCAG 2.5.8's target size, also on phones */
+  min-width: 24px;
   background: transparent;
   color: var(--dim);
   border: none;
@@ -1014,6 +1026,27 @@ body > .hub-mark {
   font-size: 0.9rem;
   line-height: 1.25;
 }
+/* A solve in Unlimited shows (user, 08-10-2026; unlimited.js, celebrate):
+   the reveal line glows gold for a moment and the clock's "n solved" pops.
+   The reveal itself stays until the next message. Reduced motion: the text
+   only. */
+.message.celebrate { animation: solve-glow 1.6s ease-out; }
+.unlimited-clock.celebrate { display: inline-block; animation: solve-pop 0.7s ease-out; }
+@keyframes solve-glow {
+  0% { color: var(--present); text-shadow: 0 0 0 transparent; transform: scale(1); }
+  20% { color: var(--present); text-shadow: 0 0 14px var(--present); transform: scale(1.06); }
+  60% { color: var(--present); text-shadow: 0 0 6px #b8a03866; transform: scale(1); }
+  100% { text-shadow: 0 0 0 transparent; transform: scale(1); }
+}
+@keyframes solve-pop {
+  0% { transform: scale(1); }
+  35% { transform: scale(1.3); color: var(--present); }
+  100% { transform: scale(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .message.celebrate, .unlimited-clock.celebrate { animation: none; }
+}
+
 /* Unlimited's totals in Stats & history: a session's length fits its tile */
 .unlimited-tiles .stat-val { font-size: 1.2rem; line-height: 1.375; }
 
@@ -1102,4 +1135,161 @@ html[data-star]::view-transition-image-pair(root) { background: var(--present); 
   min-width: calc(var(--key-size) * 1.5);
   padding: 0 0.15rem;
   font-size: 0.7rem;
+}
+
+/* ============ OMNI (omni.js): any identifier or name ============ */
+
+/* every width stacks like a phone: the board takes the width, the hints and
+   the sky view go below the keyboard */
+#face-omni main { max-width: min(64rem, 100%); }
+#face-omni .board-area { display: contents; }
+#face-omni .omni-closed { order: -1; }
+#face-omni .board { order: 0; margin: 0.6rem 0 0; }
+#face-omni .omni-dock { order: 3; }
+#face-omni .hint-panel { order: 4; margin: 0.4rem 0 0.8rem; }
+#face-omni .object-panel { order: 5; margin-bottom: 0.8rem; }
+#face-omni .help { order: 6; }
+#face-omni.omni-closed-state .board,
+#face-omni.omni-closed-state .keyboard,
+#face-omni.omni-closed-state .hint-panel,
+#face-omni.omni-closed-state .object-panel { display: none; }
+/* the dock stays, its keys hidden: its message is the card's notice (a new
+   day: reload; the session gone to another tab; a puzzle's last reveal),
+   below the card in the page's flow, not pinned (the re-check's R1) */
+#face-omni.omni-closed-state .omni-dock { position: static; padding: 0; background: none; }
+
+/* while OMNI is closed (no daily solved today): a card in the board's place */
+.omni-closed {
+  max-width: 28rem;
+  margin: 1.5rem 0 1rem;
+  padding: 0.9rem 1.1rem;
+  border: 1px solid var(--tile-border);
+  border-radius: 8px;
+  background: #121631cc;
+  color: var(--dim);
+  font-size: 0.9rem;
+  line-height: 1.45;
+  text-align: center;
+}
+.omni-closed-lead { color: var(--text); font-weight: 600; margin-bottom: 0.4rem; }
+
+/* The board: 28 tiles a row (the longest entry) in one line where they fit
+   at ~26 px or more, else two lines of 14; Mini's 6 tiles at the usual size.
+   Each guess row stays the full width whatever the answer, so the board
+   gives nothing away; blanks are typed and scored. */
+.omni-board {
+  --omni-gap: 3px;
+  --omni-cols: var(--omni-len, 28);
+  --omni-tile: min(2.1rem, calc((min(100vw, 64rem) - 2rem - (var(--omni-cols) - 1) * var(--omni-gap)) / var(--omni-cols)));
+  gap: 6px;
+  align-items: center;
+}
+@media (max-width: 840px) {
+  .omni-board { --omni-cols: var(--omni-half, 14); --omni-gap: 2px; }
+}
+.omni-board.mini { --omni-cols: 6; --omni-gap: var(--tile-gap); --omni-tile: var(--tile-size); }
+.omni-row {
+  display: grid;
+  grid-template-columns: repeat(var(--omni-cols), var(--omni-tile));
+  gap: 2px var(--omni-gap);
+  touch-action: manipulation;
+}
+.omni-board .tile {
+  position: relative;
+  width: var(--omni-tile);
+  height: var(--omni-tile);
+  font-size: calc(var(--omni-tile) * 0.55);
+}
+.omni-board:not(.mini) .tile { border-width: 1.5px; border-radius: 3px; }
+/* a typed blank tile says so */
+.omni-board .tile.typed-blank::after { content: "␣"; color: var(--dim); font-size: 0.75em; font-weight: 400; }
+/* Marks are never tiles (#17 Q4): the answer's show from the start between
+   the tiles of the row being typed and those to come, a guessed row shows
+   its own; drawn on the gap before the tile they stand before */
+.omni-board .tile[data-mark]::before {
+  content: attr(data-mark);
+  position: absolute;
+  z-index: 1;
+  left: calc(var(--omni-gap) / -2 - 1.5px);
+  top: -0.3em;
+  transform: translateX(-50%);
+  color: var(--present);
+  font-size: calc(var(--omni-tile) * 1.05);
+  font-weight: 900;
+  line-height: 1;
+  text-shadow: 0 0 2px var(--bg), 0 0 2px var(--bg);
+  pointer-events: none;
+}
+/* forced colours would put a backplate behind the large mark that hides the
+   borders of the tiles beside it (R2-15): the mark keeps its own colours */
+@media (forced-colors: active) {
+  .omni-board .tile[data-mark]::before { forced-color-adjust: none; color: CanvasText; text-shadow: none; }
+}
+.omni-board .tile[data-mark="-"]::before { top: 50%; transform: translate(-50%, -55%); font-size: calc(var(--omni-tile) * 0.8); }
+.omni-board .tile[data-mark="."]::before { top: auto; bottom: -0.2em; }
+.omni-row.guessed { cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.omni-row.viewing { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 2px; }
+@media (hover: hover) {
+  .omni-row.guessed:hover .tile { filter: brightness(1.2); }
+}
+
+/* the message and the keyboard (four rows: every letter, the digits, * and a
+   blank key) as one dock; on a phone or tablet, and on any screen too short
+   for the board, message and keyboard (a phone held sideways, a laptop's
+   browser at 1366x657), pinned to the bottom of the screen, the board
+   scrolling under it: so the reveal and refusals stay in sight above the
+   keys (release 2's review, R2-9, R2-13). Sticky only holds it once its own
+   place would be below the screen. */
+.omni-dock {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+@media (max-width: 840px), (max-height: 760px) {
+  .omni-dock {
+    position: sticky;
+    bottom: 0;
+    z-index: 2;
+    margin-bottom: 0.4rem;
+    padding: 4px 0 calc(6px + env(safe-area-inset-bottom, 0px));
+    background: var(--bg);
+  }
+  .omni-dock .message { margin-bottom: 0.3rem; }
+  .omni-dock .keyboard { margin-bottom: 0; }
+}
+#omni-keyboard .key.wide {
+  min-width: calc(var(--key-size) * 1.25);
+  padding: 0 0.1rem;
+  font-size: 0.68rem;
+}
+/* a phone held sideways: shorter keys leave room for the row being typed */
+@media (max-height: 500px) {
+  #omni-keyboard { gap: 5px; }
+  #omni-keyboard .key { height: 2.5rem; }
+}
+
+/* Three modes in the title row on a phone, the 𒀯 kept at every width (user,
+   08-10-2026): smaller segments, and on the tiniest phones a slightly smaller,
+   tighter title, so the row stays on one line, clear of the hub mark (its
+   star, and from 641 px its name) and the gear at every width (release 2's
+   review, R2-11, R2-12: a sweep in test_mobile) */
+@media (max-width: 700px) {
+  .mode-seg { padding: 0.15rem 0.38rem; font-size: 0.68rem; letter-spacing: 0.06em; }
+}
+@media (max-width: 450px) {
+  h1 { font-size: 1.55rem; letter-spacing: 0.2em; margin-right: -0.2em; }
+}
+@media (max-width: 370px) {
+  h1 { font-size: 1.4rem; letter-spacing: 0.1em; margin-right: -0.1em; }
+  .title-row { gap: 0.35rem; }
+  .mode-seg { padding: 0.12rem 0.3rem; font-size: 0.62rem; letter-spacing: 0.03em; }
+}
+/* narrower than WCAG's 320 px reflow width (a phone at a large display
+   zoom): the row needs 244 px at 370 px's sizes, more than the 228 px left
+   between the hub star and the gear at 300 px */
+@media (max-width: 319px) {
+  h1 { font-size: 1.25rem; letter-spacing: 0.06em; margin-right: -0.06em; }
+  .title-row { gap: 0.25rem; }
+  .mode-seg { padding: 0.12rem 0.22rem; }
 }

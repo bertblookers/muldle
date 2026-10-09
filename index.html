@@ -5,7 +5,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Muldle — Find the astronomical object name or identifier</title>
-<link rel="stylesheet" href="style.css?v=8a978bc6b0">
+<link rel="stylesheet" href="style.css?v=f17f05dd1e">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 </head>
 <body>
@@ -37,9 +37,10 @@
   </details>
 </section>
 
-<!-- The whole game flips around a central vertical axis between two modes:
-     face-id (guess the NGC/IC identifier) and face-abc (guess the object's
-     common name). Both faces are live; the settings dialog stays outside the
+<!-- The whole game is a card with three faces (flip.js): face-id (guess the
+     identifier), face-abc (the object's common name) behind it about the
+     vertical axis, and face-omni (any identifier or name) behind ABC about the
+     horizontal axis. All faces are live; the settings dialog stays outside the
      3D context (it renders in the top layer anyway). -->
 <div id="flip-scene">
 <div id="flipper">
@@ -52,6 +53,7 @@
     <div class="mode-toggle" role="group" aria-label="Game mode">
       <button type="button" class="mode-seg" data-mode="id" aria-pressed="true">ID</button>
       <button type="button" class="mode-seg" data-mode="abc" aria-pressed="false">ABC</button>
+      <button type="button" class="mode-seg" data-mode="omni" aria-pressed="false">OMNI</button>
     </div>
   </div>
   <p class="tagline">Find the astronomical object name or identifier.</p>
@@ -166,6 +168,7 @@
     <div class="mode-toggle" role="group" aria-label="Game mode">
       <button type="button" class="mode-seg" data-mode="id" aria-pressed="false">ID</button>
       <button type="button" class="mode-seg" data-mode="abc" aria-pressed="true">ABC</button>
+      <button type="button" class="mode-seg" data-mode="omni" aria-pressed="false">OMNI</button>
     </div>
   </div>
   <p class="tagline" id="abc-tagline">Name today's deep-sky object.</p>
@@ -240,6 +243,81 @@
 </main>
 </section>
 
+<section class="face" id="face-omni" aria-hidden="true" inert>
+<header>
+  <button id="omni-settings-button" class="settings-button" aria-label="Settings" title="Settings">⚙</button>
+  <div class="title-row">
+    <h1>MULDLE <span class="mul-glyph" title="MUL 𒀯 — Sumerian for 'star'">𒀯</span></h1>
+    <div class="mode-toggle" role="group" aria-label="Game mode">
+      <button type="button" class="mode-seg" data-mode="id" aria-pressed="false">ID</button>
+      <button type="button" class="mode-seg" data-mode="abc" aria-pressed="false">ABC</button>
+      <button type="button" class="mode-seg" data-mode="omni" aria-pressed="true">OMNI</button>
+    </div>
+  </div>
+  <p class="tagline">Any identifier or name can be the answer.</p>
+  <div class="nav-row">
+    <!-- OMNI is Unlimited only for now (omni.js); Mini plays the short ones -->
+    <div class="play-toggle" id="omni-play-toggle" role="group" aria-label="Unlimited or Mini" hidden>
+      <button type="button" class="play-seg" data-play="omni" aria-pressed="true">Unlimited</button>
+      <button type="button" class="play-seg" data-play="mini" aria-pressed="false">Mini</button>
+    </div>
+    <span class="unlimited-clock" id="omni-unlimited-clock" hidden></span>
+  </div>
+  <p class="puzzle-info" id="omni-puzzle-info"></p>
+</header>
+
+<main>
+  <div id="omni-closed" class="omni-closed">
+    <p class="omni-closed-lead">OMNI opens once you've solved today's ID or ABC puzzle.</p>
+    <p>Then any identifier or name in the game can be the answer, from M31 to
+    the Orion Nebula and Sirius: one random puzzle after another. Mini plays
+    the short ones.</p>
+  </div>
+  <div class="board-area">
+    <aside id="omni-hint-panel" class="hint-panel" aria-label="object hints"></aside>
+    <div id="omni-board" class="board omni-board" aria-label="OMNI board"></div>
+    <aside id="omni-object-panel" class="object-panel" hidden>
+      <div class="viewer-row">
+        <div id="omni-aladin-div"></div>
+        <div id="omni-survey-picker" class="survey-picker" aria-label="sky survey"></div>
+      </div>
+      <p id="omni-object-caption" class="object-caption"></p>
+    </aside>
+  </div>
+
+  <!-- the message and the keyboard, pinned to the bottom together where the
+       page is short (style.css), so the reveal and refusals stay in sight -->
+  <div id="omni-dock" class="omni-dock">
+    <div id="omni-message" class="message in-unlimited" role="status"></div>
+    <div id="omni-keyboard" class="keyboard omni-keyboard"></div>
+  </div>
+
+  <details class="help">
+    <summary>How to play</summary>
+    <p>In <strong>OMNI</strong> the answer can be any identifier or name in
+    Muldle: an id from any of its catalogues (<code>M31</code>,
+    <code>NGC224</code>, <code>Mel25</code>), a deep-sky object's name
+    (<code>ORION NEBULA</code>) or a constellation, star, asterism or other
+    famous object (<code>SIRIUS</code>). It opens once you've solved today's
+    ID or ABC puzzle, and plays like Unlimited: one random puzzle after
+    another, a stopwatch from your first key, stats of its own.</p>
+    <p>Every guess must be an identifier or name of the game. An object's
+    other ids and names are fine as guesses, but only the very one is the
+    answer: <code>NGC224</code> doesn't solve <code>M31</code>.</p>
+    <p>Spaces count: type them (the space bar, or ␣), and the tiles you leave
+    empty count as blanks too, so even a guess like <code>M31</code> shows how
+    long the answer is. Apostrophes, hyphens and full stops are never typed:
+    the answer's show on the board from the start, and you type a guess
+    without them (<code>CATS EYE NEBULA</code>).</p>
+    <p>After each guess the panel below describes the guessed object, as in
+    ID mode: constellation, type, magnitude, and the distance and direction
+    to the answer (0° for another id or name of the same object).</p>
+    <p><strong>Mini</strong> (beside Unlimited) plays only the short answers:
+    at most 6 characters and 3 digits, on a 6-tile board.</p>
+  </details>
+</main>
+</section>
+
 </div><!-- #flipper -->
 </div><!-- #flip-scene -->
 
@@ -272,6 +350,11 @@
     <span class="settings-toggle-text">Practice: each kind equally
       <span>random practice and Unlimited pick a kind first (deep-sky object, constellation, star, asterism, other object), each equally likely, then any name of it</span></span>
   </label>
+  <label class="settings-toggle" id="by-omni-row" hidden>
+    <input type="checkbox" id="by-omni-toggle" checked>
+    <span class="settings-toggle-text">Practice: each kind equally
+      <span>OMNI picks a kind first (one of the catalogues, or a kind of name), each equally likely, then any entry of it; Mini the same, with all its names as one kind</span></span>
+  </label>
   <button id="back-to-daily" class="settings-action" hidden>Back to today's puzzle
     <span>leave random mode (current guesses are discarded)</span></button>
 </dialog>
@@ -292,18 +375,20 @@
   <a href="https://github.com/bertblookers/muldle/blob/main/ATTRIBUTION.md" target="_blank" rel="noopener">Data credits</a></p>
 </footer>
 
-<script src="data.js?v=8a978bc6b0"></script>
-<script src="data_v2.js?v=8a978bc6b0"></script>
-<script src="names.js?v=8a978bc6b0"></script>
-<script src="names_v2.js?v=8a978bc6b0"></script>
-<script src="names_v3.js?v=8a978bc6b0"></script>
-<script src="aka.js?v=8a978bc6b0"></script>
-<script src="surveys.js?v=8a978bc6b0"></script>
-<script src="hints.js?v=8a978bc6b0"></script>
-<script src="stats.js?v=8a978bc6b0"></script>
-<script src="unlimited.js?v=8a978bc6b0"></script>
-<script src="game.js?v=8a978bc6b0"></script>
-<script src="abc.js?v=8a978bc6b0"></script>
-<script src="start.js?v=8a978bc6b0"></script>
+<script src="data.js?v=f17f05dd1e"></script>
+<script src="data_v2.js?v=f17f05dd1e"></script>
+<script src="names.js?v=f17f05dd1e"></script>
+<script src="names_v2.js?v=f17f05dd1e"></script>
+<script src="names_v3.js?v=f17f05dd1e"></script>
+<script src="aka.js?v=f17f05dd1e"></script>
+<script src="surveys.js?v=f17f05dd1e"></script>
+<script src="hints.js?v=f17f05dd1e"></script>
+<script src="stats.js?v=f17f05dd1e"></script>
+<script src="unlimited.js?v=f17f05dd1e"></script>
+<script src="game.js?v=f17f05dd1e"></script>
+<script src="abc.js?v=f17f05dd1e"></script>
+<script src="omni.js?v=f17f05dd1e"></script>
+<script src="flip.js?v=f17f05dd1e"></script>
+<script src="start.js?v=f17f05dd1e"></script>
 </body>
 </html>

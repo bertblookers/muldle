@@ -8,7 +8,7 @@
 // (ERA_V2_START, ERA_ABC_V3_START) and catalogue pools (poolFor, simbadQuery)
 // for the sky reveal. Reads ABC_NAMES (names.js, v1), ABC_NAMES_V2
 // (names_v2.js, v2) and ABC_SKY_V3 + SKY_INFO (names_v3.js, v3) for the answer
-// pools. Also owns the ID<->ABC flip at the bottom of the file.
+// pools. (The flip between the modes is flip.js's.)
 //
 // Wrapped in an IIFE: game.js and abc.js are both classic scripts sharing one
 // global lexical scope, and many top-level names (ANSWER, scoreGuess, guesses,
@@ -252,14 +252,10 @@ function theName(name, id) {
 }
 const TODAY = entryForDay(DAY);
 
-// which face is active on load (game.js's flip owns it later). Read the
-// persisted key directly — MODE_KEY isn't defined until the flip section.
+// the face a load shows (flip.js owns the mode, but runs later): the saved
+// one, or ID's for a ?p=N link when OMNI was saved (unlimited.js, faceOnLoad)
 function activeModeOnLoad() {
-  try {
-    const m = localStorage.getItem("muldle-mode-v1");
-    if (m === "abc" || m === "id") return m;
-  } catch (e) { /* ignore */ }
-  return "id";
+  return MuldleUnlimited.faceOnLoad();
 }
 
 // ?p=<day> from the URL, clamped to <= today (spoiler-free). null = absent.
@@ -656,6 +652,7 @@ function buildKeyboard() {
       const b = document.createElement("button");
       b.className = "key" + (k.length > 1 ? " wide" : "");
       b.textContent = k === "Back" ? "⌫" : k;
+      if (k === "Back") b.setAttribute("aria-label", "Delete"); // ⌫ says nothing to a screen reader
       b.addEventListener("click", () => { handleKey(k); b.blur(); });
       keyEls[k] = b;
       row.appendChild(b);
@@ -1142,6 +1139,8 @@ document.addEventListener("keydown", (e) => {
   if (window.__muldleMode !== "abc") return;
   if (settingsDialog.open || statsDialog.open) return;
   if (e.ctrlKey || e.metaKey || e.altKey) return;
+  // a text field (a sky view's search, say) keeps every key typed in it
+  if (isTextField(e.target)) return;
   // Enter or Space on a focused control (the hub mark is the first tab stop;
   // the Daily | Unlimited toggle) only works that control: it never also
   // submits the row or starts Unlimited's stopwatch (game.js's releaseControl
@@ -1181,6 +1180,7 @@ abcSettingsBtn.addEventListener("click", () => {
   document.getElementById("reset-puzzle").hidden = unlimited;
   document.getElementById("reset-random").hidden = unlimited;
   document.getElementById("by-catalogue-row").hidden = true; // ID mode's practice weighting
+  document.getElementById("by-omni-row").hidden = true;       // OMNI's
   // ABC's: only once today's pool has more than one kind (from v3)
   byKindRow.hidden = abcPracticeGroups(true).length < 2;
   byKindToggle.checked = abcByKind();
@@ -1349,6 +1349,8 @@ function finishUnlimited(won) {
   if (abcUnlimited.stale()) { newDayInUnlimited(text); return; }
   showUnlimitedPuzzle(abcUnlimited.next());
   showReveal(text);
+  // a solve shows (user, 08-10-2026; none on a load or resume)
+  if (won) MuldleUnlimited.celebrate(messageEl, clockEl);
 }
 
 // Midnight has passed in Unlimited: this page's day (its answers, pool and
@@ -1631,69 +1633,6 @@ if (abcUnlimited.on) {
 updatePlayToggle();
 abcUnlimited.setClock(clockEl);
 
-/* ============ ID <-> ABC flip ============ */
-
-const flipper = document.getElementById("flipper");
-const faceId = document.getElementById("face-id");
-const faceAbc = document.getElementById("face-abc");
-const MODE_KEY = "muldle-mode-v1";
-let mode = "id";
-
-function setInert(el, on) {
-  el.inert = on;
-  if (on) el.setAttribute("aria-hidden", "true");
-  else el.removeAttribute("aria-hidden");
-}
-
-function applyMode(m, animate) {
-  mode = m;
-  window.__muldleMode = m;
-  // an Unlimited stopwatch runs only while its face shows
-  MuldleUnlimited.sync();
-  // the active face flows (drives #flipper's height); the other overlays it
-  faceId.classList.toggle("face-active", m === "id");
-  faceAbc.classList.toggle("face-active", m === "abc");
-  // a transition only runs when we animate AND motion isn't reduced; when it
-  // does, .flip-anim defers each face's show/hide to the midpoint so neither
-  // ghosts through (Firefox doesn't cull the backface — see style.css)
-  const willAnimate = animate && !(window.matchMedia &&
-    window.matchMedia("(prefers-reduced-motion: reduce)").matches);
-  flipper.classList.toggle("flip-anim", willAnimate);
-  if (!animate) flipper.classList.add("no-anim");
-  flipper.classList.toggle("flipped", m === "abc");
-  if (!animate) { void flipper.offsetWidth; flipper.classList.remove("no-anim"); }
-  // hide whichever face is now rotated away (deferred to the flip midpoint by
-  // .flip-anim when animating, instant otherwise)
-  faceId.classList.toggle("face-back", m !== "id");
-  faceAbc.classList.toggle("face-back", m !== "abc");
-  setInert(faceId, m !== "id");
-  setInert(faceAbc, m !== "abc");
-  document.querySelectorAll(".mode-seg").forEach(b =>
-    b.setAttribute("aria-pressed", String(b.dataset.mode === m)));
-  // keep the shareable ?p= in sync with whichever mode is now active
-  if (window.__muldle && window.__muldle.syncUrl) window.__muldle.syncUrl();
-}
-
-// once the spin settles, drop the midpoint delay (steady-state visibility is
-// already correct, so this changes nothing visible)
-flipper.addEventListener("transitionend", (e) => {
-  if (e.target === flipper && e.propertyName === "transform")
-    flipper.classList.remove("flip-anim");
-});
-
-function setMode(m) {
-  if (m === mode) return;
-  try { localStorage.setItem(MODE_KEY, m); } catch (e) { /* ignore */ }
-  applyMode(m, true);
-}
-
-document.querySelectorAll(".mode-seg").forEach(b =>
-  b.addEventListener("click", () => { setMode(b.dataset.mode); b.blur(); }));
-
-try {
-  const saved = localStorage.getItem(MODE_KEY);
-  if (saved === "abc" || saved === "id") mode = saved;
-} catch (e) { /* ignore */ }
-applyMode(mode, false);
+// the flip between the modes lives in flip.js (three faces since OMNI)
 
 })();

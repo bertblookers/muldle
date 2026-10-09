@@ -774,14 +774,10 @@ const navNumEl = document.getElementById("nav-num-val");
 /* ---- navigator plumbing: URL param + cross-mode bridge (kept below the DOM
    marker so tools/test_logic.mjs's pre-DOM sandbox never touches window) ---- */
 
-// the active mode is owned by abc.js's flip; game.js runs before it sets
-// window.__muldleMode, so on load we read the persisted preference directly
+// the face a load shows (flip.js owns the mode, but runs later): the saved
+// one, or ID's for a ?p=N link when OMNI was saved (unlimited.js, faceOnLoad)
 function activeModeOnLoad() {
-  try {
-    const m = localStorage.getItem("muldle-mode-v1");
-    if (m === "abc" || m === "id") return m;
-  } catch (e) { /* ignore */ }
-  return "id";
+  return MuldleUnlimited.faceOnLoad();
 }
 
 // a shareable, reload-safe ?p=<day> for the active mode's puzzle. Clamped to
@@ -899,6 +895,7 @@ function buildKeyboard() {
       const b = document.createElement("button");
       b.className = "key" + (k.length > 1 ? " wide" : "");
       b.textContent = k === "Back" ? "⌫" : k;
+      if (k === "Back") b.setAttribute("aria-label", "Delete"); // ⌫ says nothing to a screen reader
       // blur so a later physical Enter doesn't re-activate the clicked key
       b.addEventListener("click", () => { handleKey(k); b.blur(); });
       keyEls[k] = b;
@@ -1487,6 +1484,8 @@ document.addEventListener("keydown", (e) => {
   if (window.__muldleMode && window.__muldleMode !== "id") return; // ABC face active
   if (settingsDialog.open || statsDialog.open) return;
   if (e.ctrlKey || e.metaKey || e.altKey) return;
+  // a text field (a sky view's search, say) keeps every key typed in it
+  if (isTextField(e.target)) return;
   // Enter or Space on a focused control (the hub mark is the first tab stop;
   // the Daily | Unlimited toggle, the navigator) only works that control: it
   // never also submits the row or starts Unlimited's stopwatch. Controls blur
@@ -1784,6 +1783,8 @@ function finishUnlimited(won) {
   if (idUnlimited.stale()) { newDayInUnlimited(text); return; }
   showUnlimitedPuzzle(idUnlimited.next());
   showReveal(text);
+  // a solve shows (user, 08-10-2026; none on a load or resume)
+  if (won) MuldleUnlimited.celebrate(messageEl, clockEl);
 }
 
 // Midnight has passed in Unlimited: this page's day (its answers, pool and
@@ -1897,8 +1898,9 @@ settingsBtn.addEventListener("click", () => {
   // Unlimited moves on by itself: no replaying a puzzle, no practice object
   resetPuzzleBtn.hidden = unlimited;
   resetRandomBtn.hidden = unlimited;
-  byCatalogueRow.hidden = false; // ID mode's weighting (abc.js shows its own)
+  byCatalogueRow.hidden = false; // ID mode's weighting (abc.js and omni.js show their own)
   byKindRow.hidden = true;
+  document.getElementById("by-omni-row").hidden = true;
   settingsDialog.showModal();
 });
 // <dialog> refocuses the opener on close; blur it so Enter/space for the next
